@@ -1,0 +1,10 @@
+ /* Take a chunk off a bin list */
+ #define unlink(P, BK, FD) {                                          \
+   FD = P->fd;                                                        \
+   BK = P->bk;                                                        \
+	 ...security checks...
+	 FD->bk = BK;                                                       \
+	 BK->fd = FD;                                                       \
+	 ...security checks/irrelevant bits...
+ }
+

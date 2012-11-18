@@ -1,0 +1,15 @@
+\section{Stack}
+One of the oldest memory corruption vulnerabilities is the stack-based buffer overflow.
+Popularized partly due to Aleph One's paper ``Smashing The Stack For Fun And Profit"\footnote{http://insecure.org/stf/smashstack.html},
+this older vulnerability is still a significant issue for application
+security. Though modern countermeasures make successful exploitation more difficult, it serves
+as both an occasional serious flaw, and an excellent introduction to memory corruption vulnerabilities.
+
+%"basics" subsection used to be here
+\input{stack/basics.tex}
+
+%code execution
+\input{stack/code_execution.tex}
+
+%levels from fusion introducing ASLR
+\input{stack/aslr.tex}

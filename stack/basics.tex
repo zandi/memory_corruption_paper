@@ -1,0 +1,116 @@
+\subsection{Basics}
+At the heart of the stack-based buffer overflow is the buffer overflow. This usually 
+occurs when data is being copied into an array, but proper bounds-checking is not performed,
+allowing writing to sections of memory not belonging to the array. For example, the
+following code contains a buffer overflow vulnerability:
+\lstinputlisting[language=C]{stack1.c}
+This will locally allocate 16 bytes for our character array. Conceptually, these 16 bytes
+are often thought of as separate of other areas of memory, but after compiling and disassembling,
+we can see that this is plainly not the case:
+\begin{lstlisting}
+080483fc <main>:
+80483fc:       55                      push   %ebp
+80483fd:       89 e5                   mov    %esp,%ebp
+80483ff:       83 e4 f0                and    $0xfffffff0,%esp
+8048402:       83 ec 30                sub    $0x30,%esp
+8048405:       c7 44 24 2c f0 f0 f0    movl   $0xf0f0f0f0,0x2c(%esp)
+804840c:       f0 
+804840d:       8d 44 24 1c             lea    0x1c(%esp),%eax
+8048411:       89 04 24                mov    %eax,(%esp)
+8048414:       e8 b7 fe ff ff          call   80482d0 <gets@plt>
+8048419:       c9                      leave  
+804841a:       c3                      ret    
+\end{lstlisting}
+
+\small{(note: this example used gcc 4.7.1, objdump 2.22.0, and gdb 7.4.1)}\normalsize\\
+
+First we have the usual function prelude, followed by an AND'ing of the \texttt{\$esp} register with \texttt{0xfffffff0}.
+At line 5 we grow the stack by \texttt{0x30} bytes, and from lines 6 and 8, we can see that our ``flag" integer
+is at \texttt{\$esp+0x2c}, while our character array begins at \texttt{\$esp+0x1c}. If we were to pause execution
+immediately before the call to \texttt{gets()} on line 10, the portion of interest of our stack would look as follows:
+
+%\begin{table}
+\begin{center}
+	\begin{tabular}{r|l|}
+	higher memory addresses & \vdots\\
+	\hline\hline
+	\multirow{4}{*}{} & \texttt{0xf0}\\\cline{2-2}& \texttt{0xf0}\\\cline{2-2}& \texttt{0xf0}\\\cline{2-2}
+	flag & \texttt{0xf0}\\
+	\hline
+	% this makes the figure a bit too big. \multirow{16}{*}{} & \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}& \\\cline{2-2}
+	array (16 uninitialized bytes)&\vdots \\\cline{2-2}
+	\hline
+	24 unused bytes & \vdots \\\cline{2-2}
+	\hline
+	\multirow{3}{*}{} &\\\cline{2-2} &\\\cline{2-2} (address of array)&\\\cline{2-2}
+	\texttt{\$esp} $\rightarrow$ &\\
+	\hline\hline
+	lower memory addresses & \vdots\\
+	\end{tabular}
+%\caption{stack during execution}
+\end{center}
+%\end{table}
+
+Normally this would just be an implementation detail that the compiler abstracts away for
+the user, but in the case of buffer overflow vulnerabilities, such details become important.
+On line 7 of our C source, we have a call to the standard library function gets. A quick read
+of the manpage reveals the notoreity gets has earned itself for its role in buffer overflows:\\
+
+%\begin{lstlisting}
+\begin{sloppypar} %fix to keep from overrunning the margin
+\texttt{
+Never use gets().  Because it is impossible to tell without knowing the
+data in advance how many  characters  gets()  will  read,  and  because
+gets() will continue to store characters past the end of the buffer, it
+is extremely dangerous to use.  It has  been  used  to  break  computer
+security.  Use fgets() instead.
+}\\
+\end{sloppypar}
+%\end{lstlisting}
+
+When even the man page so strongly advises against use, we can appreciate the severity of the flaw.
+However, nothing is quite like a hands-on example. In fact, let's debug the program under the influence of this bug.
+We'll just do something simple, changing the value stored in the local integer ``flag". This would normally
+be impossible to do from just operating on a different variable, but the lack of bounds-checking in gets, as 
+well as the integer's position behind our buffer on the stack allow this to happen:
+
+\begin{lstlisting}
+[zandi@hacktop paper]$ gdb -q ./stack1
+Reading symbols from /home/zandi/OU/exploits/paper/stack1...(no debugging symbols found)...done.
+(gdb) disas main
+Dump of assembler code for function main:
+ 0x080483fc <+0>:     push   %ebp
+ 0x080483fd <+1>:     mov    %esp,%ebp
+ 0x080483ff <+3>:     and    $0xfffffff0,%esp
+ 0x08048402 <+6>:     sub    $0x30,%esp
+ 0x08048405 <+9>:     movl   $0xf0f0f0f0,0x2c(%esp)
+ 0x0804840d <+17>:    lea    0x1c(%esp),%eax
+ 0x08048411 <+21>:    mov    %eax,(%esp)
+   0x08048414 <+24>:    call   0x80482d0 <gets@plt>
+   0x08048419 <+29>:    leave  
+   0x0804841a <+30>:    ret    
+End of assembler dump.
+(gdb) b *(main+29)
+Breakpoint 1 at 0x8048419
+(gdb) r
+Starting program: /home/zandi/OU/exploits/paper/stack1 
+warning: Could not load shared library symbols for linux-gate.so.1.
+ you need "set solib-search-path" or "set sysroot"?
+asdfasdfasdfasdfAAAA
+
+Breakpoint 1, 0x08048419 in main ()
+(gdb) x/x ($esp+0x2c)
+0xbffff9bc:     0x41414141
+(gdb) x/s ($esp+0x1c)
+0xbffff9ac:      "asdfasdfasdfasdfAAAA"
+\end{lstlisting}
+As we can see, we filled our buffer with more than its limit of 16 characters, carefully choosing the
+4 characters to overflow with to have hex code \texttt{0x41} with standard ANSI encoding. This makes confirmation
+of overwriting our integer easy, and we can see that indeed we have changed the local integer ``flag" from
+\texttt{0xf0f0f0f0} to \texttt{0x41414141}.\\
+
+So, we see how lack of proper bounds-checking on such operations can lead to unintended consequences,
+but how bad can it really be? It may be hard to imagine a situation where overwriting a variable like
+this can be dangrous, but with a little ingenuity, it's easy to see.\\
+
+

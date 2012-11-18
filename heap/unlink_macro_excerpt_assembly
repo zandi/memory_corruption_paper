@@ -1,0 +1,6 @@
+0x080498f7 <free+211>:  mov    -0x14(%ebp),%eax
+0x080498fa <free+214>:  mov    -0x18(%ebp),%edx
+0x080498fd <free+217>:  mov    %edx,0xc(%eax)
+0x08049900 <free+220>:  mov    -0x18(%ebp),%eax
+0x08049903 <free+223>:  mov    -0x14(%ebp),%edx
+0x08049906 <free+226>:  mov    %edx,0x8(%eax)

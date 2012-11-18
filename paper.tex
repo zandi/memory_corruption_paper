@@ -1,0 +1,69 @@
+%LICENSE
+%This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/.
+
+%this will be the main paper
+%first, some basic setup stuff
+\documentclass[a4paper]{article}
+\renewcommand{\abstractname}{Introduction} %change title of the abstract section
+\usepackage[cm]{fullpage} %smaller margins for code listings
+\usepackage{wrapfig} %text-wrapping with figures would be nice, but it's SUCH a pain in the ass
+\usepackage{multirow}
+\usepackage{listings}
+\usepackage{color}
+\definecolor{lightgray}{rgb}{0.75,0.75,0.75}
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+
+\lstset{
+	basicstyle=\footnotesize\ttfamily,
+	captionpos=b,
+	frame=single,
+	rulecolor=\color{black},
+	numbers=left,
+	numberstyle=\tiny,
+	tabsize=2,
+	title=\lstname,
+	keywordstyle=\color{blue},
+	commentstyle=\color{dkgreen},
+	stringstyle=\color{mauve},
+	backgroundcolor=\color{lightgray},
+	escapeinside={\%*}{*)} %i forget what exactly this does... comments?
+}
+
+\begin{document}
+\title{Memory Corruption Exploits}
+%personal info removed for now
+\author{zandi\\
+	University\\
+	\texttt{email@address}}
+\date{\today}
+\maketitle
+
+\begin{abstract}
+Though meant for a novice, prior knowledge of various concepts are recommended. For example,
+the reader should be familiar with the stack data structure, byte endianness, and operating system
+concepts like user privilege separation. Knowledge of C and assembler is also reccommended, along
+with basic usage of standard utilities such as \texttt{gcc, gdb, objdump}, and linux in general.
+If you wish to follow along with basic examples on a modern operating system, you will likely
+need to manually disable many exploit mitigation mechanisms. For example, since linux kernel
+2.6.12, the linux kernel has supported Address Space Layout Randomization (ASLR). This can be
+checked with \texttt{cat /proc/sys/kernel/randomize\_va\_space}. Values of 1 or 2 indicate that
+ASLR is enabled, while a value of 0 indicates that ASLR is disabled. This can be manually
+changed using \texttt{echo}. For example, to disable ASLR we will do the following as root:
+\texttt{echo 0 > /proc/sys/kernel/randomize\_va\_space}. Besides ASLR, the target may also need to
+be recompiled to disable gcc's stack protection. Simply recompiling with the \texttt{-fno-stack-protector}
+argument should do this. Finally, if an exploit involves executing code placed on the stack, then
+the stack will need to be marked executable.\\
+
+This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
+To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/.
+
+\end{abstract}
+
+%stack section 
+\input{stack/stack.tex}
+
+IN-PROGRESS: explore modern protection mechanisms
+
+\input{heap/heap.tex}
+\end{document}

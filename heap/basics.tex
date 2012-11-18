@@ -1,0 +1,107 @@
+\subsection{Basics}
+Consider the following program.
+
+\lstinputlisting[language=C]{heap/heap0.c}
+
+As is obvious, this program will allocate two structures on the heap,
+point the function pointer to the \texttt{nowinner()} function,
+politely tell us where both structures are located, take our
+input as argument from the command line, then jump to our function pointer.
+As should also be obvious by now, is that \texttt{strcpy()} does
+not do bounds-checking on the input, and that this is very bad.
+
+Running the program normally, we can see that we did not win.
+We pass an argument to avoid a null pointer dereference.
+\begin{lstlisting}
+user@protostar:~/heap/heap0$ /opt/protostar/bin/heap0 asdf
+data is at 0x804a008, fp is at 0x804a050
+level has not been passed
+\end{lstlisting}
+Helpfully, we can see that there are \texttt{0x48} (72) bytes
+from the beginning of our vulnerable buffer to the obvious target; \texttt{fp}.
+
+However, this is the heap, so let's take a look at the memory to really get
+an idea of what's happening. Remember that when displaying memory in 4-byte
+chunks using the 'x' command in gdb, it will do the conversion between
+big and little-endian automatically.
+
+\begin{lstlisting}
+user@protostar:~/heap/heap0$ gdb -q /opt/protostar/bin/heap0
+Reading symbols from /opt/protostar/bin/heap0...done.
+(gdb) b *(main+81)
+Breakpoint 1 at 0x80484dd: file heap0/heap0.c, line 36.
+(gdb) r asdf
+Starting program: /opt/protostar/bin/heap0 asdf
+data is at 0x804a008, fp is at 0x804a050
+
+Breakpoint 1, main (argc=2, argv=0xbffff864) at heap0/heap0.c:36
+(gdb) x/24x 0x0804a000
+0x804a000:      0x00000000      0x00000049      0x00000000      0x00000000
+0x804a010:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804a020:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804a030:      0x00000000      0x00000000      0x00000000      0x00000000
+0x804a040:      0x00000000      0x00000000      0x00000000      0x00000011
+0x804a050:      0x08048478      0x00000000      0x00000000      0x00020fa9
+\end{lstlisting}
+
+Here, we pause execution directly after the \texttt{printf} on line 36.
+This way, we can easily examine the state of our allocated chunks
+after they've been set up, noticing an important difference. As these
+chunks are dynamically allocated, the dlmalloc/ptmalloc algorithms
+require some metadata in order to manage these chunks efficiently.
+To truly understand heap exploitation, you have to understand the algorithm
+of the heap you are attacking. For this example, we don't necessarily
+have to understand much, but this is a perfect opportunity to point out the
+some of the important parts.
+
+First, notice that we're told that our first heap structure, \texttt{d},
+is located at \texttt{0x0804a008}. For all the programmer cares, this is
+true. Their 64-character buffer does indeed start at \texttt{0x0804a008}.
+However, within dlmalloc/ptmalloc, this chunck actually begins at 
+\texttt{0x0804a000}. This is because of the \texttt{prev\_size} and
+\texttt{size} fields at the beginning of each chunk which store
+metadata required by dlmalloc/ptmalloc. As \texttt{prev\_size} is
+not technically used on allocated chunks, these are zero.
+
+Notice that the 4-byte int at \texttt{0x0804a004} is \texttt{0x49}.
+Because of various reasons, the lowest 3
+bits of \texttt{size} are used as status flags, so this actually
+says that the current chunk's size is \texttt{0x48} (72) bytes, and
+that the previous chunk is in use. Likewise, the function
+pointer \texttt{fp} is located at the chunk beginning at
+\texttt{0x0804a048}, which has a \texttt{size} of \texttt{0x11},
+telling us this chunk is 16 bytes, and that the previous chunk is in use. 
+
+Turning away from heap internals and back towards the situation at hand,
+this is a straightforward buffer overflow, much like the stack ones we've
+already discussed. Since we want to change \texttt{fp} to point to
+\texttt{winner} instead of \texttt{nowinner}, we can simply place that
+address in the function pointer.
+
+\begin{lstlisting}
+user@protostar:~/heap/heap0$ objdump -t /opt/protostar/bin/heap0 | grep winner
+08048464 g     F .text  00000014              winner
+08048478 g     F .text  00000014              nowinner
+user@protostar:~/heap/heap0$ cat do_heap0 && ./do_heap0
+/opt/protostar/bin/heap0 `perl -e '$buf = "A"x72; print $buf."\x64\x84\x04\x08"'`
+data is at 0x804a008, fp is at 0x804a050
+level passed
+\end{lstlisting}
+
+Here, we've used a nifty bash trick by building our buffer with perl, then
+printing it and using the result as our argument. As noted previously, there
+were 72 bytes from the beginning of the vulnerable buffer to the beginning
+of the target data, so we pad 72 bytes, then concatenate with the address
+of the \texttt{winner} function in little endian. This overwrites \texttt{fp},
+as is obvious from the \texttt{level passed} message.
+
+So, what's the big difference between this and a stack-based buffer overflow?
+Notice that in order to overflow to \texttt{fp}, we had to overwrite
+both the \texttt{size} and \texttt{prev\_size} fields of the chunk
+it belongs to. In this situation, there were no more heap manipulations
+between when we attacked, at line 36, and when we got the result we
+wanted, at line 38. However, it's possible that other operations, such
+as a \texttt{free(f)} after our overwrite, could potentially corrupt the heap,
+or crash the program. This presents an interesting situation; if overwriting
+the user data the chunks store won't get us what we want, could overwriting
+heap meatadata do so?
