@@ -1,0 +1,23 @@
+The main point of this paper is education. if it helps people learn
+about memory corruption vulns/exploits, that's great, and if
+you want to contribute, that's great too. This is originally for
+a class, so no contributions will be accepted until it's been
+turned in for grading (sometimes mid-december 2012).
+
+to build the paper, simply run 'pdflatex paper.tex'. The output
+will be 'paper.pdf'. Below is the output from 'pdflatex --version',
+in case you have problems building and want to know what i used.
+
+pdfTeX 3.1415926-2.4-1.40.13 (TeX Live 2012/Arch Linux)
+kpathsea version 6.1.0
+Copyright 2012 Peter Breitenlohner (eTeX)/Han The Thanh (pdfTeX).
+There is NO warranty.  Redistribution of this software is
+covered by the terms of both the pdfTeX copyright and
+the Lesser GNU General Public License.
+For more information about these matters, see the file
+named COPYING and the pdfTeX source.
+Primary author of pdfTeX: Peter Breitenlohner (eTeX)/Han The Thanh (pdfTeX).
+Compiled with libpng 1.5.12; using libpng 1.5.13
+Compiled with zlib 1.2.7; using zlib 1.2.7
+Compiled with poppler version 0.20.5
+
