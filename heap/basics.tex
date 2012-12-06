@@ -22,7 +22,7 @@ from the beginning of our vulnerable buffer to the obvious target; \texttt{fp}.
 
 However, this is the heap, so let's take a look at the memory to really get
 an idea of what's happening. Remember that when displaying memory in 4-byte
-chunks using the 'x' command in gdb, it will do the conversion between
+chunks using the `x' command in gdb, it will do the conversion between
 big and little-endian automatically.
 
 \begin{lstlisting}
@@ -44,7 +44,7 @@ Breakpoint 1, main (argc=2, argv=0xbffff864) at heap0/heap0.c:36
 0x804a050:      0x08048478      0x00000000      0x00000000      0x00020fa9
 \end{lstlisting}
 
-Here, we pause execution directly after the \texttt{printf} on line 36.
+Here, we pause execution directly after the \texttt{printf} on line 34.
 This way, we can easily examine the state of our allocated chunks
 after they've been set up, noticing an important difference. As these
 chunks are dynamically allocated, the dlmalloc/ptmalloc algorithms

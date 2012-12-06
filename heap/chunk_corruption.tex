@@ -7,7 +7,8 @@ dlmalloc/ptmalloc to do unexpected things, such as overwrite
 arbitrary portions of memory. However, this can be fairly 
 complicated and involved. Please note that in this example, while
 we are still essentially attacking a standard glibc implementation of dlmalloc,
-the authors from \texttt{exploit-exercises.com} have somewhat simplified it.
+the authors from \texttt{exploit-exercises.com}\footnote{http://www.exploit-exercises.com}
+have somewhat simplified it.
 This specific program is statically compiled with some slightly modified
 glibc code, removing sanity and security checks which would otherwise
 make exploitation very difficult. While this makes it easier to illustrate

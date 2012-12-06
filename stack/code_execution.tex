@@ -116,7 +116,7 @@ buffers of different length into the program and examining the crash to determin
 we want, but we can do better than that. Remembering that the arguments to \texttt{main}
 are \texttt{int argc, char **argv, char **envp}, we can easily find our target. Given the
 way we executed the program, we know that \texttt{argc} is 1, and \texttt{argv} points to a
-\texttt{char *} which is pointing to the string "/opt/protostar/bin/stack5". In fact, the
+\texttt{char *} which is pointing to the string ``/opt/protostar/bin/stack5". In fact, the
 \texttt{0x00000001} at \texttt{0xbffff7d0} is a dead-ringer for \texttt{argc}, so on lines
 32 and 34 we verify that we indeed have the expected \texttt{char **argv} at \texttt{0xbffff7d4}.
 This is indeed the case, so we now know that arguments to \texttt{main} are at \texttt{0xbffff7d0},

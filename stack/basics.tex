@@ -5,7 +5,7 @@ allowing writing to sections of memory not belonging to the array. For example, 
 following code contains a buffer overflow vulnerability:
 \lstinputlisting[language=C]{stack1.c}
 This will locally allocate 16 bytes for our character array. Conceptually, these 16 bytes
-are often thought of as separate of other areas of memory, but after compiling and disassembling,
+are often thought of as separate from other areas of memory, but after compiling and disassembling,
 we can see that this is plainly not the case:
 \begin{lstlisting}
 080483fc <main>:
@@ -86,9 +86,9 @@ Dump of assembler code for function main:
  0x08048405 <+9>:     movl   $0xf0f0f0f0,0x2c(%esp)
  0x0804840d <+17>:    lea    0x1c(%esp),%eax
  0x08048411 <+21>:    mov    %eax,(%esp)
-   0x08048414 <+24>:    call   0x80482d0 <gets@plt>
-   0x08048419 <+29>:    leave  
-   0x0804841a <+30>:    ret    
+ 0x08048414 <+24>:    call   0x80482d0 <gets@plt>
+ 0x08048419 <+29>:    leave  
+ 0x0804841a <+30>:    ret    
 End of assembler dump.
 (gdb) b *(main+29)
 Breakpoint 1 at 0x8048419
