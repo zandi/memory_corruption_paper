@@ -15,7 +15,8 @@ here, as it's assumed the reader is already familiar with this. It will suffice 
 register is stored on the stack when entering the function, and retreived later to return execution
 flow to the correct point. The basic situation is that any stack-based buffer will have this stored return
 address after it in memory, allowing an attacker to overwrite it during a buffer overflow. To see precisely
-how this is done, we'll explore another example. The target is very simple, so for extra challenge
+how this is done, we'll explore another example. The target will be the stack5 challenge on protostar.
+It is very simple, so for extra challenge
 we will only use the compiled binary as a reference, doing some light reverse-engineering.
 
 \begin{lstlisting}
@@ -101,7 +102,7 @@ Dump of assembler code for function __libc_start_main:
 
 It's assumed that the reader is familiar enough with gdb that only the bits relevant to our overflow
 will need explaining. Once we set our breakpoint and stop execution on it, we examine the stack.
-Since \texttt{gets} takes an argument of type \texttt{char *}, on line 23 we examine our buffer, 
+Since \texttt{gets} takes an argument of type \texttt{char *}, on lines 23 and 25 we examine our buffer, 
 plus some of what's after it. Note that in disassembling our target, we don't yet know precisely
 how large the buffer is designed to be, but we can certainly place bounds on it. For example,
 we know it must be at least \texttt{0x40} bytes, but its limit is also determined by the
@@ -158,7 +159,9 @@ So, we can redirect execution arbitrarily, but what good does that do us? Certai
 whatever other functions and code our target has loaded into memory, right? Well, the answer is a little
 more complicated than that, and without modern protections, certainly easier. For example, older
 programs usually have an executable stack, allowing us to overflow our buffer with code that we will
-then execute. As a simple proof of concept, we will exploit the vulnerable program \texttt{stack5}
+then execute. This works because in most modern computers, and certainly the x86 ones we're examining,
+code is data and data is code, the only difference is in how it's interpreted. 
+As a simple proof of concept, we will exploit the vulnerable program \texttt{stack5}
 using a simple payload to change the program's exit value to 42. An easy way to get working machine
 code is simply to write a C program doing what you want, compiling, then disassembling it.
 
@@ -282,12 +285,6 @@ well as test that our shellcode functions as it should.
 \begin{lstlisting}
 user@protostar:~/shellcode/exit$ gdb -q ./shellcode
 Reading symbols from /home/user/shellcode/exit/shellcode...(no debugging symbols found)...done.
-(gdb) b *launchpad
-Breakpoint 1 at 0x8048394
-(gdb) r
-Starting program: /home/user/shellcode/exit/shellcode 
-
-Breakpoint 1, 0x08048394 in launchpad ()
 (gdb) disas launchpad
 Dump of assembler code for function launchpad:
 0x08048394 <launchpad+0>:       push   %ebp

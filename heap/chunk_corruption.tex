@@ -52,22 +52,41 @@ However, interestingly only certain values will cause us to crash with a segfaul
 while other values seem to have no effect. This is specifically because of 
 some indicator bits encoded within the size field, and how they affect execution
 of dlmalloc's various subroutines. Because of this, and many other things, we will
-need to have a brief overview of some specific parts of glibc's dlmalloc implementation.\\
+want to have some familiarity with glibc's dlmalloc implementation.\\
 
-TODO: go over various things here as glibc dlmalloc primer. may want to move this elsewhere?
+Despite its age, the best overview of dlmalloc/ptmalloc is from Vudo Malloc Tricks\footnote{http://phrack.org/issues.html?issue=57\&id=8\&mode=txt}
+by  Michel "MaXX" Kaempf. It goes over the entire collection of
+algorithms in quite some depth, and as described by Phrack's authors 
+upon its publication, ``... if you are serious about learning this
+technique, there is no way around the article by MaXX". For an even
+better reference, I recommend grabbing an old copy of the glibc source
+code\footnote{http://ftp.gnu.org/gnu/libc/glibc-2.11.2.tar.gz}, and reading the ``malloc/malloc.c" file within it. Though
+at some times dense and apparently difficult to understand, the comments
+alone are worth having the file as a reference to the dlmalloc/ptmalloc
+algorithm as it is implemented. The primary facts necessary for this paper
+are that:
 \begin{itemize}
-	\item chunk structure \& fields (prev\_size, size, FD, BK)
-	\item free algorithm
-	\item unlink macro (macro abuse)
+\item Free memory is divided into ``chunks", and managed on a per-chunk basis.
+\item Chunks which are no longer in use are kept in one of many circularly-linked lists.
+\item Chunks are always contiguous in memory (no empty gaps).
+\item A free chunk is never contiguous with other free chunks. In such a case, they will be coalesced into one chunk.
+\item The beginning of each chunk contains metadata necessary for proper functioning of the algorithms.
 \end{itemize}
+Keeping these as handy references, it is
+also recommended to be familiar with singly and doubly linked lists,
+as well as structures in C.\\
 
 %at this point, we should have just enough backgound in dlmalloc to follow the exploit.
+%would be nice to talk about dlmalloc/ptmalloc more, but can't right now...
 
-So, we at least know enough about dlmalloc to exploit this program. Recalling
+So, we're at least able to follow along as we exploit this program. Only
+immediately relevant parts of dlmalloc/ptmalloc will be covered, so it's
+recommended to do some research on your own for better comprehension. Recalling 
 that we have the power to overflow chunks \texttt{b} and \texttt{c}, how
 could we modify values to get what we want? For maximum satisfaction, at this 
-point you should study glibc source code and phrack articles to independently
-discover the solution. If you're willing to spoil your own fun, continue reading.
+point you should study glibc source code and phrack articles\footnote{http://dl.packetstormsecurity.net/papers/attack/MallocMaleficarum.txt}\footnote{http://www.phrack.org/issues.html?issue=66\&id=10\&mode=txt}\footnote{http://www.phrack.org/issues.html?issue=67\&id=8\&mode=txt} to independently
+discover the solution. If you're willing to spoil your own fun, continue reading.\\
+
 The most obvious and straightforward 
 method (in this case) will be to make clever use of the unlink macro. Though
 fairly complicated for a macro, we can isolate the important parts of it for study,
@@ -84,8 +103,8 @@ will need to be modified to remove \texttt{P} from the list. In fact,
 this is exactly what happens at lines \texttt{6} and \texttt{7}, when
 either chunk's location is written in the other's appropriate pointer.
 But wait a minute, each chunk here (\texttt{P}, \texttt{FD}, \texttt{BK})
-is basically a \texttt{struct malloc\_chunk}. As we discussed earlier,
-this structure's \texttt{fd} and \texttt{bk} \texttt{malloc\_chunk*}
+is basically a \texttt{struct malloc\_chunk}. 
+This structure's \texttt{fd} and \texttt{bk} \texttt{malloc\_chunk*}
 fields are located (in our specific case) at \texttt{P+8} and 
 \texttt{P+12} respectively, assuming we focus on chunk \texttt{P} as an example.
 So, we can think of the two assignments on lines \texttt{6} and \texttt{7}
@@ -124,7 +143,7 @@ be unlinked from a list of free chunks. Since our program is vulnerable
 to a buffer overflow, we can not only overflow two separate chunks
 \texttt{b} and \texttt{c} which may possibly be unlinked later, but we can also
 overflow the locations of their \texttt{fd} and \texttt{bk} fields. The
-only hurdle left would be getting one of these chunks to operated
+only hurdle left would be getting one of these chunks operated
 on by the \texttt{unlink} macro.
 
 Going back to the dlmalloc algorithms (specifically, \texttt{free} and \texttt{malloc})
@@ -236,7 +255,7 @@ Essentially, we want \texttt{\&(FD->bk) == A}, which means we need \texttt{FD+0x
 Simple algebra then gives that \texttt{FD == A - 0xc}, so we'll want to take the
 desired target, \texttt{A}, and place the bytes of \texttt{(long)(A - 0xc)} in our
 buffer. Since the \texttt{unlink} macro will directly place \texttt{BK} here,
-well then place the bytes of \texttt{(long)B} immediately after this, where our fake
+we'll then place the bytes of \texttt{(long)B} immediately after this, where our fake
 chunk's \texttt{bk} field would be. Throughout this entire process, we
 need to remember that our values of \texttt{A} and \texttt{B} are limited to
 be within writeable pages of memory. Also, when constructing the buffer, we need
@@ -397,7 +416,7 @@ dynamite failed?
 Program exited with code 021.
 \end{lstlisting}
 
-No segfault! now we'll breakpoint after each of our 3 calls to \texttt{free}
+No segfault! Now we'll breakpoint after each of our 3 calls to \texttt{free}
 to see how things change.
 
 \begin{lstlisting}
@@ -497,7 +516,7 @@ Breakpoint 8, main (argc=4, argv=0xbffff824) at heap3/heap3.c:26
 \end{lstlisting}
 
 Alright, so we can clearly control this arbitrary memory write with precision. Now,
-how do we exploit this? what do we overwrite to exploit the program? In reality,
+how do we exploit this? What do we overwrite to exploit the program? In reality,
 this may heavily depend on the target program. In some cases we may only want
 to flip a bit to set a flag or change some other variable in memory, but
 a more devastating option is to redirect execution. While we could
@@ -511,7 +530,7 @@ could be possible, but we'd normally have to set up variables on the stack
 to do anything useful with that. Instead, we'll redirect execution back
 into the heap, which is mapped as both writeable and executable.
 
-TODO: insert objdump/readelf/whatever output here to show this is true
+%TODO: insert objdump/readelf/whatever output here to show this is true
 
 First, we'll find our return address. This is similar to the stack portion, where
 we simply breakpoint somewhere in main, then examine the stack to determine where
@@ -556,7 +575,7 @@ Excellent! We filled chunk \texttt{c} with NOPs, but any non-null value would've
 As we can see, we crash with a SIGFPE exception at \texttt{0x0804c065}. This address is
 on the heap, just a few bytes after the beginning of chunk \texttt{c}. Then, we examine
 chunk \texttt{c} to see exactly what happened. Our NOPs were loaded (and executed) just
-fine, but trouble starts where we crashed (unsurprisingly). Our NOP sled was corrupted
+fine, but trouble starts where we crashed (imagine that). Our NOP sled was corrupted
 by \texttt{0xbffff750}, the very address we overwrote! Here we encounter one of the
 final hurdles to succesfull exploitation. Because we used the unlink macro, it will
 perform two writes, one of which will always be in our shellcode (assuming that's what
@@ -569,14 +588,14 @@ don't crash.
 
 The shellcode we're using is essentially the \texttt{exit(42)} shellcode from earlier,
 but with a short jump in the beginning, and some unused bytes between it and the
-main portion of the shellcode. Also, we want have to consider that as part
+main portion of the shellcode. Also, we have to consider that as part
 of the frees that occur, the first 4 bytes of chunk \texttt{c} will be zeroed, and
 we want to maintain filling chunk \texttt{c} with exactly 32 bytes. That way we
 don't have to go back and re-find the return address' location on the stack.
 
-
-TODO: add a shellcode section?
-
+%TODO: should explain this a little better, reference shellcode section
+Skipping over the details of assembly programming and dumping the bytecode,
+we have the following escaped-byte string which will serve as our shellcode.
 \begin{lstlisting}
 "\xeb\x0c\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x31\xc0\x31\xdb\xb3\x2a\xb0\x01\xcd\x80"
 \end{lstlisting}
@@ -667,7 +686,7 @@ Program exited with code 052.
 We can plainly see that we jump to our shellcode. What we also notice
 is that our shellcode performs a short (relative) jump to the standard
 \texttt{exit(42)} shellcode from before. To fully complete the challenge,
-we want to call to \texttt{winner} function, then clean up after ourselves
+we want to call the \texttt{winner} function, then clean up after ourselves
 so that the program can exit normally. This is left as an excercise for the
 reader.
 % /opt/protostar/bin/heap3 `python -c 'print("A"*32 + "\xfc\xff\xff\xff" + "\xfc\xff\xff\xff")'` `python -c 'print("\x04\xc0\x04\x08"+"\x40\xf7\xff\xbf"+"\x5c\xc0\x04\x08"+"\x04\xc0\x04\x08"*5)'` `python -c 'print("\x90"*32)'`

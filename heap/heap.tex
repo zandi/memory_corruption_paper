@@ -1,9 +1,9 @@
 \section{Heap}
 There are two ways to allocate the memory necessary to store and manipulate data;
 statically, and dynamically. In the previous section, we saw how one
-specific sort of static allocation - stack-based - could lead to
+specific sort of dynamic allocation - stack-based - could lead to
 security vulnerabilities when proper precautions aren't taken. In this section,
-we will shift focus to dynamically allocated memory, and how
+we will shift focus to another sort of dynamically allocated memory, and how
 certain mistakes with dealing with such memory can lead to exploitation
 of the vulnerable program. There are some major differences between
 dynamically and statically allocated memory. Obviously, dynamically
@@ -23,6 +23,14 @@ which is entirely outside our control.
 
 To simply demonstrate the concepts, we will be focusing on very simple
 example programs, beginning with a very straightforward buffer overflow.
+It should be noted that the details of ptmalloc/dlmalloc may change from
+challenge to challenge. It seems that some are designed to be possible
+without abusing the ptmalloc/dlmalloc algorithm itself, while others require
+this more complicated approach. Thus, the ``easier" challenges will have
+protections still in place, while the ``harder" challenges actually have
+countermeasures removed, and other simplifications made. This can help
+make learning easier, but you should remember this when you expand
+on this knowledge by examining other scenarios.
 
 %should we discuss the basics of dlmalloc/ptmalloc here? or just provide references?
 

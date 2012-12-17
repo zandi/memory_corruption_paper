@@ -53,8 +53,8 @@ immediately before the call to \texttt{gets()} on line 10, the portion of intere
 
 Normally this would just be an implementation detail that the compiler abstracts away for
 the user, but in the case of buffer overflow vulnerabilities, such details become important.
-On line 7 of our C source, we have a call to the standard library function gets. A quick read
-of the manpage reveals the notoreity gets has earned itself for its role in buffer overflows:\\
+On line 7 of our C source, we have a call to the standard library function \texttt{gets}. A quick read
+of the manpage reveals the notoreity \texttt{gets} has earned itself for its role in buffer overflows:\\
 
 %\begin{lstlisting}
 \begin{sloppypar} %fix to keep from overrunning the margin
@@ -71,7 +71,7 @@ security.  Use fgets() instead.
 When even the man page so strongly advises against use, we can appreciate the severity of the flaw.
 However, nothing is quite like a hands-on example. In fact, let's debug the program under the influence of this bug.
 We'll just do something simple, changing the value stored in the local integer ``flag". This would normally
-be impossible to do from just operating on a different variable, but the lack of bounds-checking in gets, as 
+be impossible to do from just operating on a different variable, but the lack of bounds-checking in \texttt{gets}, as 
 well as the integer's position behind our buffer on the stack allow this to happen:
 
 \begin{lstlisting}

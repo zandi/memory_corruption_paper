@@ -27,6 +27,11 @@
 	commentstyle=\color{dkgreen},
 	stringstyle=\color{mauve},
 	backgroundcolor=\color{lightgray},
+	breaklines=true, %will hopefully auto-break long lines in code blocks
+	breakautoindent=false,
+	breakindent=0pt,
+	postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookrightarrow\space}}, %for a marker post-pagebreak
+	%prebreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookrightarrow\space}}, %for a marker post-pagebreak
 	escapeinside={\%*}{*)} %i forget what exactly this does... comments?
 }
 
@@ -44,6 +49,14 @@ Though meant for a novice, prior knowledge of various concepts are recommended. 
 the reader should be familiar with the stack data structure, byte endianness, and operating system
 concepts like user privilege separation. Knowledge of C and assembler is also reccommended, along
 with basic usage of standard utilities such as \texttt{gcc, gdb, objdump}, and linux in general.
+This paper makes extensive use of the Protostar\footnote{http://exploit-exercises.com/protostar} and 
+Fusion\footnote{http://exploit-exercises.com/fusion} virtual machines from \texttt{exploit-exercises.com},
+to demonstrate the concepts covered. As the paper is written for the reader to follow along on their
+own (extensive snippets from terminal sessions), it is highly recommended to download and install these
+virtual machines. The author did this with virtualbox 4.2.4 with a linux host OS on a system with
+an Intel Atom N270 and 1GB of system memory, so doing so shouldn't be difficult for the vast majority
+of readers.\\
+
 If you wish to follow along with basic examples on a modern operating system, you will likely
 need to manually disable many exploit mitigation mechanisms. For example, since linux kernel
 2.6.12, the linux kernel has supported Address Space Layout Randomization (ASLR). This can be
@@ -52,11 +65,27 @@ ASLR is enabled, while a value of 0 indicates that ASLR is disabled. This can be
 changed using \texttt{echo}. For example, to disable ASLR we will do the following as root:
 \texttt{echo 0 > /proc/sys/kernel/randomize\_va\_space}. Besides ASLR, the target may also need to
 be recompiled to disable gcc's stack protection. Simply recompiling with the \texttt{-fno-stack-protector}
-argument should do this. Finally, if an exploit involves executing code placed on the stack, then
-the stack will need to be marked executable.\\
+argument should do this. If an exploit involves executing code placed on the stack, then
+the stack will need to be marked executable. For the heap portion of this paper, it may
+be necessary to manually link the target with an older version of glibc, even as far back as
+2.11 or prior. Because of all these extra considerations, it's really recommended to use the virtual
+machine whenever possible.\\
+
+Throughout the many code snippets in the paper, there are lines which are simply too long
+to include on the page without line wrapping. When this happens, there is no actual line break
+in the code, the extra text has simply has been moved down for readability. This should
+be reflected by both the line numbers of the code snippet, as well as the inclusion
+of a ``$\hookrightarrow$" character at the beginning of a wrapped line. This may seem silly,
+but when hand-crafting exploit buffers a stray newline will break things, so I'd rather
+be clear about this now than have a reader struggle later. The one exception to this is the
+ASLR section. The long buffers of sequential characters just weren't being wrapped properly,
+so I did so manually. Rest assured, they contain no newlines.\\
 
 This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
-To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/.
+To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/. This
+license only covers the paper itself. Should the paper be packaged/bundled with other
+materials (other papers, virtual machines, etc...), these fall out of the scope of this license,
+and maintain whatever license they come with.
 
 \end{abstract}
 
@@ -64,4 +93,23 @@ To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-
 \input{stack/stack.tex}
 
 \input{heap/heap.tex}
+
+\section{Conclusion}
+In conclusion, The memory corruption bugs discussed (buffer overflows)
+are a historically important vulnerability. Over nearly 20 years such
+vulnerabilities have been exploited to break computer security for anywhere
+from malicious to benevolent ends. For modern consideration, these vulnerabilities
+can be largely mitigated by using tools such as PaX, but still pose a threat
+to improperly secured and unpatched systems, or when targeted by very
+skilled and dedicated attackers. While the topic is still relevant, the
+aspiring researcher has much work ahead of themselves to get up to pace
+with contemporary exploitation, and unfortunately even learning the basics
+in an insecure environment can be difficult.
+Hopefully the reader can take away from this a better understanding of buffer
+overflows withiin Linux on the IA-32 architecture, and examine other topics
+such as circumventing exploit mitigations, exploitation on other architectures,
+or exploitation on other operating systems. At the very least, I hope to have
+encouraged or sparked the curiosity to tinker with the various gadgets and systems
+around ourselves. You never know what you might find.
+%happy hacking!
 \end{document}
