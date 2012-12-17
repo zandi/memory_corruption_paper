@@ -133,7 +133,7 @@ to both addresses are also addresses themselves, both values we
 write must also be addresses which are currently writeable in the process.
 Though we will typically focus on only using one of the variables
 for the target of our overwrite, we have to remember that two
-writes will occur based on the values of \texttt{fd} and \texttt{bk}.
+writes will occur based on the values of \texttt{fd} and \texttt{bk}.\\
 
 Now, this seems to be begging the question. If we could overwrite memory
 to give \texttt{P->fd} and \texttt{P->bk} specific values, wouldn't
@@ -144,7 +144,7 @@ to a buffer overflow, we can not only overflow two separate chunks
 \texttt{b} and \texttt{c} which may possibly be unlinked later, but we can also
 overflow the locations of their \texttt{fd} and \texttt{bk} fields. The
 only hurdle left would be getting one of these chunks operated
-on by the \texttt{unlink} macro.
+on by the \texttt{unlink} macro.\\
 
 Going back to the dlmalloc algorithms (specifically, \texttt{free} and \texttt{malloc})
 we see that there are certain circumstances that would cause a free chunk
@@ -156,7 +156,7 @@ calls are made, and it's not clear that any of our chunks will be
 automatically coalesced when they are freed. It would be nice if we could
 force execution of the \texttt{unlink} macro instead of hoping one
 occurs naturally. In fact, this is not only possible, but is an important
-part of exploiting this program.
+part of exploiting this program.\\
 
 When a chunk is freed, the \texttt{free} algorithm will check if 
 contiguous chunks are in use, in order to coalesce them to reduce 
@@ -239,7 +239,7 @@ Instead, we could take advantage of two's complement, give \texttt{prev\_size} a
 fake chunk within chunk \texttt{b}'s data portion. For example,
 overwriting \texttt{prev\_size} with \texttt{0xfffffffc} (-4) would
 place the fake chunk at \texttt{\&p + 0x4}, meaning that the fake chunk's
-forward and back pointers will be at \texttt{\&p + 0x0c} and \texttt{\&p + 0x10}.
+forward and back pointers will be at \texttt{\&p + 0x0c} and \texttt{\&p + 0x10}.\\
 
 Assuming we wanted to overwrite the 4 bytes beginning at address \texttt{A} with
 some value \texttt{B}, we'd have to do the following to properly set up our
@@ -259,7 +259,7 @@ we'll then place the bytes of \texttt{(long)B} immediately after this, where our
 chunk's \texttt{bk} field would be. Throughout this entire process, we
 need to remember that our values of \texttt{A} and \texttt{B} are limited to
 be within writeable pages of memory. Also, when constructing the buffer, we need
-to conform to the architecture's endianness, which in this case is little-endian.
+to conform to the architecture's endianness, which in this case is little-endian.\\
 
 Alright, enough planning and theory, let's try this out. First, let's inspect
 precisely how our chunks are laid out in memory. First, we place a breakpoint 
@@ -528,7 +528,7 @@ For example, we can't redirect execution to some function in .data because it's
 read-only. Redirecting to some library function in the Global Offset Table (.got)
 could be possible, but we'd normally have to set up variables on the stack
 to do anything useful with that. Instead, we'll redirect execution back
-into the heap, which is mapped as both writeable and executable.
+into the heap, which is mapped as both writeable and executable.\\
 
 %TODO: insert objdump/readelf/whatever output here to show this is true
 
@@ -584,7 +584,7 @@ starting either 8 bytes in or 12 bytes in, clobbered. We could write our shellco
 here after the arbitrary memory write in \texttt{unlink}, but this simply isn't
 an option in this situation. Instead, we'll have to modify the shellcode to
 short-jump over this corruption, or perform some other trick so we at least
-don't crash.
+don't crash.\\
 
 The shellcode we're using is essentially the \texttt{exit(42)} shellcode from earlier,
 but with a short jump in the beginning, and some unused bytes between it and the
@@ -592,13 +592,12 @@ main portion of the shellcode. Also, we have to consider that as part
 of the frees that occur, the first 4 bytes of chunk \texttt{c} will be zeroed, and
 we want to maintain filling chunk \texttt{c} with exactly 32 bytes. That way we
 don't have to go back and re-find the return address' location on the stack.
-
-%TODO: should explain this a little better, reference shellcode section
 Skipping over the details of assembly programming and dumping the bytecode,
 we have the following escaped-byte string which will serve as our shellcode.
 \begin{lstlisting}
 "\xeb\x0c\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x31\xc0\x31\xdb\xb3\x2a\xb0\x01\xcd\x80"
 \end{lstlisting}
+%TODO: should explain this a little better, reference shellcode section
 
 The large stream of \texttt{0x90} bytes is simply so we can be sure our short jump
 will indeed jump over the corruption from \texttt{unlink}. We'll wind up having

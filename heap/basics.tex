@@ -70,7 +70,7 @@ says that the current chunk's size is \texttt{0x48} (72) bytes, and
 that the previous chunk is in use. Likewise, the function
 pointer \texttt{fp} is located at the chunk beginning at
 \texttt{0x0804a048}, which has a \texttt{size} of \texttt{0x11},
-telling us this chunk is 16 bytes, and that the previous chunk is in use. 
+telling us this chunk is 16 bytes, and that the previous chunk is in use. \\
 
 Turning away from heap internals and back towards the situation at hand,
 this is a straightforward buffer overflow, much like the stack ones we've
@@ -93,7 +93,7 @@ printing it and using the result as our argument. As noted previously, there
 were 72 bytes from the beginning of the vulnerable buffer to the beginning
 of the target data, so we pad 72 bytes, then concatenate with the address
 of the \texttt{winner} function in little endian. This overwrites \texttt{fp},
-as is obvious from the \texttt{level passed} message.
+as is obvious from the \texttt{level passed} message.\\
 
 So, what's the big difference between this and a stack-based buffer overflow?
 Notice that in order to overflow to \texttt{fp}, we had to overwrite

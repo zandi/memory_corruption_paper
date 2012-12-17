@@ -20,7 +20,7 @@ any protections, so it should be fairly straightforward. This is
 \texttt{level00} on the \texttt{fusion} virtual machine from exploit-exercises.com.
 This is designed to pick up where protostar left off, and introduce
 more advanced concepts, such as exploit mitigations. We'll leave
-further vm-specific information for later.
+further vm-specific information for later.\\
 
 First, the scenario. Following is the important bits of the source 
 from exploit-exercises.com:
@@ -183,7 +183,7 @@ This is why we move to the next challenge, \texttt{level01}.
 It is identical to the previous one, but with a form of ASLR, and 
 won't give us hints. This way, we can borrow all of the work
 we just did, but in adapting it to \texttt{level01}, focus
-only on the ASLR-related aspects.
+only on the ASLR-related aspects.\\
 
 The challenge ASLR presents is in loading various sections of a 
 program at different addresses each run. While in previous examples
@@ -195,7 +195,7 @@ executions. Without being able to know where certain things are,
 such as the buffer we fill, jumping to our shellcode becomes a
 challenge. However, there are many techniques to bypass
 ASLR, and the only real limit is your creativity within the
-situation of the vulnerability.
+situation of the vulnerability.\\
 
 One method of bypassing ASLR is by leveraging some sort of
 information leak bug. In the previous example, we were told
@@ -203,7 +203,7 @@ exactly where our buffer was. If we had something similar here,
 then we could simply use that to deduce where the stack was
 mapped, and where our buffer would be. If ASLR depends on the 
 attacker not knowing (or not being able to predict) addresses, 
-then an information leak would easily defeat it.
+then an information leak would easily defeat it.\\
 
 Another large family of techniques is code reuse. First recognized
 as ``ret2libc"\footnote{http://www.infosecwriters.com/text\_resources/pdf/return-to-libc.pdf}
@@ -232,7 +232,7 @@ of code re-use even further, it's possible to chain together
 execution of multiple snippets of code to get much more flexibility
 in what we can do, at the cost of higher complexity. Commonly known
 as Return Oriented Programming (ROP), this technique is out of the 
-scope of this paper.
+scope of this paper.\\
 
 Back to the challenge at hand, let's simply try our code blindly
 and see what happens. We know the program is largely the same, 

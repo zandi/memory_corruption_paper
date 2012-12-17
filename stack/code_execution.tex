@@ -126,12 +126,13 @@ we examine that section of memory (\texttt{0xb7eadc76}) for instructions, and fi
 in \texttt{\_\_libc\_start\_main}, disassemble it a bit further to verify that it is preceded by a 
 \texttt{call} instruction at \texttt{0xb7eadc73}. Seeing this, we can confidently say that
 our vulnerable buffer begins at \texttt{0xbffff780} and our ultimate target is at \texttt{0xbffff7cc},
-so we want a buffer with a length of \texttt{0x50} (80) bytes.
+so we want a buffer with a length of \texttt{0x50} (80) bytes. \\
 
-For those not masochistic enough to prefer the gdb output, following is a diagram of the stack upon hitting
-our breakpoint.
-
-TODO: add diagram
+%TODO: add diagram later...
+%For those not masochistic enough to prefer the gdb output, following is a diagram of the stack upon hitting
+%our breakpoint.
+%
+%TODO: add diagram
 
 So, we've established that with a buffer of 80 bytes, we can take advantage of the buffer overflow
 to overwrite a value which will ultimately let us decided where the processor will load and
@@ -327,7 +328,7 @@ data as 5 instructions, we see the instructions of our shellcode.
 Continuing execution, we exit with a status of \texttt{052},
 which is the octal representation of \texttt{42} in decimal,
 fully convincing us that our shellcode was executed and does
-what we want. Now, to make use of it in an actual exploit.
+what we want. Now, to make use of it in an actual exploit.\\
 
 For the \texttt{stack5} challenge, we have a fairly simple setup.
 
