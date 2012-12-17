@@ -177,7 +177,7 @@ facility to call the \texttt{sys\_exit} function within the kernel. As this invo
 registers before issuing an interrupt via \texttt{int \$0x80}, we'll want to look for this instruction.
 
 Secondly, gcc will compile programs for dynamic linking by default. This means we can't
-simply disassemble our binary and find the ia32 instructions for \texttt{\_exit}, but
+simply disassemble our binary and find the x86 instructions for \texttt{\_exit}, but
 instead we have to debug it live, waiting for the linker to place the glibc library in
 our process' memory space. Alternatively, we could compile with the \texttt{-static}
 option to statically link glibc into our binary, but either way we'll get the same result.

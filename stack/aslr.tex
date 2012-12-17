@@ -147,7 +147,7 @@ So, if we were to place some bytes after ``HTTP/1.1", then not only
 will this not ruin our psuedo-http compliance, but these bytes will
 not be checked in any way, as our overflow bytes passed to \texttt{realpath(path, resolved)} were.
 Let's explore this with the magical byte \texttt{0xcc}. According to
-the Intel Manuals for the IA-32 architecture\footnote{http://www.intel.com/content/www/us/en/processors/architectures-software-developer-manuals.html}, this
+the Intel Manuals for the x86 architecture\footnote{http://www.intel.com/content/www/us/en/processors/architectures-software-developer-manuals.html}, this
 is for the \texttt{INT 3} instruction, used by debuggers to set breakpoints.
 To redirect execution to our test shellcode, we'll need to calculate its address.
 With some simple algebra, we simply add the number of characters
